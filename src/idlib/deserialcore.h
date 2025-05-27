@@ -1,0 +1,41 @@
+#pragma once
+#include <string>
+#include <cstdint>
+#include <unordered_map>
+
+class BinaryReader;
+
+struct deserializer {
+
+};
+
+namespace deserial {
+
+	/* Common Types */
+	void ds_pointerbase(BinaryReader& reader, std::string& writeTo);
+	void ds_enumbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, const char*>& enumMap);
+	void ds_blockbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap);
+	void ds_structbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap);
+	void ds_idList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string writeTo));
+	void ds_staticList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string writeTo));
+	
+
+
+	/* Primitive Types */
+	void ds_bool(BinaryReader& reader, std::string& writeTo);
+	void ds_char(BinaryReader& reader, std::string& writeTo);
+	void ds_unsigned_char(BinaryReader& reader, std::string& writeTo);
+	void ds_wchar_t(BinaryReader& reader, std::string& writeTo);
+	void ds_short(BinaryReader& reader, std::string& writeTo);
+	void ds_unsigned_short(BinaryReader& reader, std::string& writeTo);
+	void ds_int(BinaryReader& reader, std::string& writeTo);
+	void ds_unsigned_int(BinaryReader& reader, std::string& writeTo);
+	void ds_long(BinaryReader& reader, std::string& writeTo);
+	void ds_long_long(BinaryReader& reader, std::string& writeTo);
+	void ds_unsigned_long(BinaryReader& reader, std::string& writeTo);
+	void ds_unsigned_long_long(BinaryReader& reader, std::string& writeTo);
+	void ds_float(BinaryReader& reader, std::string& writeTo);
+	void ds_double(BinaryReader& reader, std::string& writeTo);
+
+};
+

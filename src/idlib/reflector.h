@@ -1,0 +1,4 @@
+
+namespace idlibReflector {	
+	void Generate();
+}
