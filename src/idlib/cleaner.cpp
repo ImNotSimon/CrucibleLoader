@@ -31,6 +31,59 @@ std::string CleanName(const std::string_view from) {
 	return to;
 }
 
+bool FindFlag(std::string_view flags, std::string_view target) {
+    size_t pos = flags.find(target);
+
+    if(pos == std::string_view::npos)
+        return false;
+
+    // Verify the left side is delimited
+    if (pos != 0) {
+        switch (flags[pos - 1]) {
+            case ' ': case '\t': case '|':
+            break;
+
+            default:
+            return false;
+        }
+    }
+
+    // Verify the right side is delimited
+    if (pos + target.length() != flags.length()) {
+        switch (flags[pos + target.length()]) {
+            case ' ': case '\t': case '|':
+            break;
+
+            default:
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void TokenizeFlags(std::string_view comment, bool& EDIT, bool& DESIGN, bool& DEF) {
+    std::string_view flags = comment.substr(2); // Exclude the // chars
+
+    // This string should only contain all-caps, or's and whitespace
+    // Otherwise it's a developer comment
+    for (char c : flags) {
+        switch (c) {
+            case '|': case ' ': case '\t':
+            continue;
+
+            default:
+            if(c < 'A' && c > 'Z' && c != '_')
+                return;
+            continue;
+        }
+    }
+
+    EDIT = FindFlag(flags, "EDIT");
+    DESIGN = FindFlag(flags, "DESIGN");
+    DEF = FindFlag(flags, "DEF");
+}
+
 enum TokenType {
 	TT_End,
 	TT_Colon,
@@ -41,6 +94,7 @@ enum TokenType {
 	TT_Semicolon,
 	TT_Asterisk,
 
+    TT_Comment,
 	TT_ParenthBlock,
 	TT_TemplateBlock,
 	TT_BracketBlock,
@@ -84,8 +138,6 @@ class idlibCleaner {
 
 	ParsedToken Tokenize();
 	void TokenAssert(TokenType type);
-	ParsedToken TokenizeRoot();
-	ParsedToken TokenizeAnything(char delimiter);
 	void BuildStruct();
 	void BuildEnum();
 	void Build();
@@ -167,20 +219,23 @@ ParsedToken idlibCleaner::Tokenize() {
         currentLine++;
         goto LABEL_TOKENIZE_START;
 
-		case '/':
-		if (*++ch == '/') {
-			LABEL_COMMENT_START:
-			switch (*++ch)
-			{
-                // Todo: Optimize to skip newline?
-                case '\r': case '\n': case '\0':
-                goto LABEL_TOKENIZE_START;
+        case '/': {
+            char* first = ch;
+            if (*++ch == '/') {
+                LABEL_COMMENT_START:
+                switch (*++ch)
+                {
+                    // Todo: Optimize to skip newline?
+                    case '\r': case '\n': case '\0':
+                    return { TT_Comment, std::string_view(first, ch - first) };
 
-				default:
-				goto LABEL_COMMENT_START;
-			}
-		}
-		else throw Error("Invalid Comment Syntax");
+                    default:
+                    goto LABEL_COMMENT_START;
+                }
+            }
+            else throw Error("Invalid Comment Syntax");
+        }
+
 
         case '(':
         {
@@ -445,6 +500,9 @@ void idlibCleaner::BuildStruct() {
     while (true) {
         struct {
             bool excluding = false;
+            bool EDIT = false; // Flags that indicate the property is editable in idStudio
+            bool DESIGN = false;
+            bool DEF = false;
             int pointers = 0;
             int staticArrayIndex = -1;
             int typeEndIndex = -1;
@@ -453,9 +511,33 @@ void idlibCleaner::BuildStruct() {
         } val;
 
         tokens.clear();
-        tokens.push_back(Tokenize());
-        if(tokens.back().type == TT_BraceClose)
-            break;
+
+        {
+            ParsedToken comment = Tokenize();
+            if(comment.type == TT_BraceClose)
+                break;
+            assert(comment.type == TT_Comment); // Offset + Size comment
+
+
+            /* Parse the specifierFlags_t that indicate which variables are exposed to idStudio */
+            comment = Tokenize();
+            if (comment.type == TT_Comment) {
+
+                TokenizeFlags(comment.data, val.EDIT, val.DESIGN, val.DEF);
+
+                // There will be some false positives if the second comment ends up being the
+                // developer comment...but there should only be a handful of these
+                // TODO: Must fix these false positives - including TYPEDEF being interpreted as DEF
+                //val.EDIT = comment.data.find("EDIT") != std::string_view::npos;
+                //val.DESIGN = comment.data.find("DESIGN") != std::string_view::npos;
+                //val.DEF = comment.data.find("DEF") != std::string_view::npos;
+
+                comment = Tokenize(); // Optional third developer comment
+                if(comment.type != TT_Comment)
+                    tokens.push_back(comment);
+            }
+            else tokens.push_back(comment);
+        }
 
         do {
             tokens.push_back(Tokenize());
@@ -554,7 +636,7 @@ void idlibCleaner::BuildStruct() {
         }
         else {
             
-            bool obj = val.pointers > 0 || val.staticArrayIndex > -1;
+            bool obj = val.pointers > 0 || val.staticArrayIndex > -1 || val.EDIT || val.DESIGN || val.DEF;
 
             writeto->append("\t\t\t");
             writeto->append(CleanName(val.type));
@@ -575,11 +657,22 @@ void idlibCleaner::BuildStruct() {
                 writeto->append("\n\t\t\t\tarray = ");
                 writeto->append(brack.substr(1, brack.length() - 2));
             }
+
+            if(val.EDIT)
+                writeto->append("\n\t\t\t\tEDIT");
+            if(val.DESIGN)
+                writeto->append("\n\t\t\t\tDESIGN");
+            if(val.DEF)
+                writeto->append("\n\t\t\t\tDEF");
             
             writeto->append(obj ? "\n\t\t\t}\n" : "\n");
         }
 
     }
+
+    /*
+    * END OF READ VARIABLE LOOP
+    */
     TokenAssert(TT_Semicolon);
     writeto->append("\t\t}\n");
 
@@ -623,7 +716,11 @@ void idlibCleaner::BuildEnum() {
 
 void idlibCleaner::Build() {
 	ParsedToken keyword = Tokenize();
-	while (keyword.type == TT_Keyword) {
+	while (keyword.type == TT_Keyword || keyword.type == TT_Comment) {
+        if (keyword.type == TT_Comment) {
+            keyword = Tokenize();
+            continue;
+        }
 
 		if (keyword.data == "enum") {
 			BuildEnum();

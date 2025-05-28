@@ -1,4 +1,4 @@
 
-namespace idlibReflector {	
+namespace idlibReflection {	
 	void Generate();
 }

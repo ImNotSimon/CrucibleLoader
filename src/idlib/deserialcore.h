@@ -6,7 +6,7 @@
 class BinaryReader;
 
 struct deserializer {
-
+	void (*callback)(BinaryReader& reader, std::string& writeto) = nullptr;
 };
 
 namespace deserial {

@@ -38,9 +38,13 @@ enum deserialFlags {
 struct deserializer {
 	void (*callback)(BinaryReader& reader, std::string& writeto) = nullptr;
 	const char* name = nullptr;
-	int flags = 0;
+	int arraylength = 0;
 
 	void Exec(BinaryReader& reader, std::string& writeTo) {
+
+		if (arraylength > 0) {
+			// Call static array function
+		}
 		writeTo.append(name);
 		writeTo.append(" = ");
 		callback(reader, writeTo);
@@ -57,10 +61,10 @@ struct recurs {
 
 int main() {
 
-	idlibCleaning::Generate();
-	// Uncomment later
-	//idlibReflector::Generate();
+	// TODO: EDIT|DESIGN|DEF - Parse commentfor these flags
 
+	//idlibCleaning::Generate();
+	idlibReflection::Generate();
 	
 
 	//recurs s = {2, new recurs{34, new recurs}}
