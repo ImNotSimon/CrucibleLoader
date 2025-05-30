@@ -2,6 +2,10 @@
 #include "io/BinaryReader.h"
 #include <cassert>
 
+void deserializer::Exec(BinaryReader& reader, std::string& writeTo) {
+
+}
+
 void deserial::ds_pointerbase(BinaryReader& reader, std::string& writeTo)
 {
 	// We assume all pointer variables are file hashes...for simplicity 

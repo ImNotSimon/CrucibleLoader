@@ -98,6 +98,8 @@ bool EntNode::ValueBool(bool& writeTo) const {
 
 bool EntNode::findPositionalID(EntNode* n, int& id)
 {
+	// We're not doing any undo/redo here, and this function is slowing everything down
+	return 0;
 	if (this == n) return true;
 	id++;
 

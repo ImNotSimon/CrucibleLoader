@@ -1,5 +1,6 @@
 #pragma once
 
 namespace idlibCleaning {
-	void Generate();
+	void Pass1();
+	void Pass2();
 }

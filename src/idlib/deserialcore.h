@@ -7,6 +7,10 @@ class BinaryReader;
 
 struct deserializer {
 	void (*callback)(BinaryReader& reader, std::string& writeto) = nullptr;
+	const char* name = nullptr;
+	int arrayLength = 0; // If > 0, treat this as a static array
+
+	void Exec(BinaryReader& reader, std::string& writeTo);
 };
 
 namespace deserial {

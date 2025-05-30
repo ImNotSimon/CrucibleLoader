@@ -62,7 +62,7 @@ bool FindFlag(std::string_view flags, std::string_view target) {
     return true;
 }
 
-void TokenizeFlags(std::string_view comment, bool& EDIT, bool& DESIGN, bool& DEF) {
+bool TokenizeFlags(std::string_view comment) {
     std::string_view flags = comment.substr(2); // Exclude the // chars
 
     // This string should only contain all-caps, or's and whitespace
@@ -74,14 +74,18 @@ void TokenizeFlags(std::string_view comment, bool& EDIT, bool& DESIGN, bool& DEF
 
             default:
             if(c < 'A' && c > 'Z' && c != '_')
-                return;
+                return false;
             continue;
         }
     }
 
-    EDIT = FindFlag(flags, "EDIT");
-    DESIGN = FindFlag(flags, "DESIGN");
-    DEF = FindFlag(flags, "DEF");
+    if(FindFlag(flags, "EDIT"))
+        return true;
+    if(FindFlag(flags, "DESIGN"))
+        return true;
+    if(FindFlag(flags, "DEF"))
+        return true;
+    return false;
 }
 
 enum TokenType {
@@ -500,9 +504,7 @@ void idlibCleaner::BuildStruct() {
     while (true) {
         struct {
             bool excluding = false;
-            bool EDIT = false; // Flags that indicate the property is editable in idStudio
-            bool DESIGN = false;
-            bool DEF = false;
+            bool INCLUDE = false; // Determined by parsing reflection flags
             int pointers = 0;
             int staticArrayIndex = -1;
             int typeEndIndex = -1;
@@ -523,14 +525,7 @@ void idlibCleaner::BuildStruct() {
             comment = Tokenize();
             if (comment.type == TT_Comment) {
 
-                TokenizeFlags(comment.data, val.EDIT, val.DESIGN, val.DEF);
-
-                // There will be some false positives if the second comment ends up being the
-                // developer comment...but there should only be a handful of these
-                // TODO: Must fix these false positives - including TYPEDEF being interpreted as DEF
-                //val.EDIT = comment.data.find("EDIT") != std::string_view::npos;
-                //val.DESIGN = comment.data.find("DESIGN") != std::string_view::npos;
-                //val.DEF = comment.data.find("DEF") != std::string_view::npos;
+                val.INCLUDE = TokenizeFlags(comment.data);
 
                 comment = Tokenize(); // Optional third developer comment
                 if(comment.type != TT_Comment)
@@ -636,7 +631,7 @@ void idlibCleaner::BuildStruct() {
         }
         else {
             
-            bool obj = val.pointers > 0 || val.staticArrayIndex > -1 || val.EDIT || val.DESIGN || val.DEF;
+            bool obj = val.pointers > 0 || val.staticArrayIndex > -1 || val.INCLUDE;
 
             writeto->append("\t\t\t");
             writeto->append(CleanName(val.type));
@@ -658,12 +653,8 @@ void idlibCleaner::BuildStruct() {
                 writeto->append(brack.substr(1, brack.length() - 2));
             }
 
-            if(val.EDIT)
-                writeto->append("\n\t\t\t\tEDIT");
-            if(val.DESIGN)
-                writeto->append("\n\t\t\t\tDESIGN");
-            if(val.DEF)
-                writeto->append("\n\t\t\t\tDEF");
+            if(val.INCLUDE)
+                writeto->append("\n\t\t\t\tINCLUDE");
             
             writeto->append(obj ? "\n\t\t\t}\n" : "\n");
         }
@@ -738,7 +729,7 @@ void idlibCleaner::Build() {
 }
 
 void idlibCleaner::Write() {
-    std::ofstream writer = std::ofstream("input/idlibcleaned.txt", std::ios_base::binary);
+    std::ofstream writer = std::ofstream("input/idlibcleaned_pass1.txt", std::ios_base::binary);
 
 	cleanenums.append("}\n");
     writer.write(cleanenums.data(), cleanenums.length());
@@ -759,7 +750,7 @@ void idlibCleaner::Write() {
 	writer.close();
 }
 
-void idlibCleaning::Generate()
+void idlibCleaning::Pass1()
 {
 	idlibCleaner cleaner = idlibCleaner();
 	if(cleaner.FailedRead())

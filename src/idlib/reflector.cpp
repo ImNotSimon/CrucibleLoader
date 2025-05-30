@@ -94,6 +94,9 @@ class idlibReflector {
         for (EntNode** iter = enumArray, **iterMax = enumArray + enumCount; iter < iterMax; iter++) {
             EntNode& current = **iter;
 
+            if(&current["INCLUDE"] == EntNode::SEARCH_404)
+                continue;
+
             desheader.append("\tvoid ds_");
             desheader.append(current.getName());
             desheader.append("(BinaryReader& reader, std::string& writeTo);\n");
@@ -134,6 +137,8 @@ class idlibReflector {
             if (HandcodedStructs.find(std::string(current.getName())) != HandcodedStructs.end()) {
                 continue;
             }
+            if(&current["INCLUDE"] == EntNode::SEARCH_404)
+                continue;
 
             desheader.append("\tvoid ds_");
             desheader.append(current.getName());
@@ -153,13 +158,24 @@ class idlibReflector {
             for (EntNode** valIter = valueArray, **valMax = valueArray + valueCount; valIter < valMax; valIter++) {
                 EntNode& v = **valIter;
 
-                if(&v["EDIT"] == EntNode::SEARCH_404 && &v["DESIGN"] == EntNode::SEARCH_404 && &v["DEF"] == EntNode::SEARCH_404)
+                if(&v["INCLUDE"] == EntNode::SEARCH_404)
                     continue;
 
                 descpp.append("\t\t{");
                 descpp.append(std::to_string(temp++));
                 descpp.append(", {&ds_");
                 descpp.append(v.getName());
+
+                descpp.append(", \"");
+                descpp.append(v.getValue());
+                descpp.append("\"");
+
+                if (&v["array"] != EntNode::SEARCH_404) {
+                    descpp.append(", ");
+                    descpp.append(v["array"].getValue());
+                }
+                
+
                 descpp.append("}},\n");
             }
 

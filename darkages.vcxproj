@@ -140,12 +140,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\idlib\cleaner_pass2.cpp" />
     <ClCompile Include="src\entityslayer\EntityLogger.cpp" />
     <ClCompile Include="src\entityslayer\EntityNode.cpp" />
     <ClCompile Include="src\entityslayer\EntityParser.cpp" />
     <ClCompile Include="src\entityslayer\GenericBlockAllocator.cpp" />
     <ClCompile Include="src\entityslayer\Oodle.cpp" />
-    <ClCompile Include="src\idlib\cleaner.cpp" />
+    <ClCompile Include="src\idlib\cleaner_pass1.cpp" />
     <ClCompile Include="src\idlib\deserialcore.cpp" />
     <ClCompile Include="src\idlib\generated\deserialgenerated.cpp" />
     <ClCompile Include="src\idlib\reflector.cpp" />

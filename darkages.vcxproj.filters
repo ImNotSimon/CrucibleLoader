@@ -33,9 +33,6 @@
     <ClCompile Include="src\idlib\deserialcore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\idlib\generated\deserialgenerated.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\entityslayer\Oodle.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -51,7 +48,13 @@
     <ClCompile Include="src\entityslayer\EntityLogger.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\idlib\cleaner.cpp">
+    <ClCompile Include="src\idlib\cleaner_pass1.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\idlib\cleaner_pass2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\idlib\generated\deserialgenerated.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -71,9 +74,6 @@
     <ClInclude Include="src\idlib\deserialcore.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="src\idlib\generated\deserialgenerated.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="src\entityslayer\Oodle.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -90,6 +90,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\idlib\cleaner.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\idlib\generated\deserialgenerated.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
