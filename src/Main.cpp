@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include "io/BinaryWriter.h"
 #include "io/BinaryReader.h"
+#include "hash/HashLib.h"
 
 //std::unordered_map<std::string, int> testMap = {
 //	{"bitches", 3}
@@ -58,14 +59,26 @@ struct recurs {
 };
 
 
-
 int main() {
 
 	// TODO: EDIT|DESIGN|DEF - Parse commentfor these flags
 
-	//idlibCleaning::Generate();
-	idlibReflection::Generate();
-	
+	//idlibCleaning::Pass1();
+	//idlibCleaning::Pass2();
+	//idlibReflection::Generate();
+
+	uint64_t hashTest = HashLib::FarmHash64("test", 4);
+	uint64_t result = 0x7717383daa85b5b2L;
+	printf("%d\n", hashTest == result);
+
+	std::string type = "ability_Dash";
+	std::string name = "ability_dash";
+	//uint64_t lo = HashLib::FarmHash64(type.data(), type.length());
+	//uint64_t hi = HashLib::FarmHash64(name.data(), name.length());
+	//uint64_t v10 = HashLib::FingerPrint(hi, lo);
+	uint64_t v10 = HashLib::DeclHash(type, name);
+
+	std::cout << std::hex << std::setfill('0') << std::setw(16) << v10 << std::endl;
 
 	//recurs s = {2, new recurs{34, new recurs}}
 	//TSerializeEnum<int, testMap>();

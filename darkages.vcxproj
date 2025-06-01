@@ -140,6 +140,8 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\hash\FarmHash.cpp" />
+    <ClCompile Include="src\hash\HashLib.cpp" />
     <ClCompile Include="src\idlib\cleaner_pass2.cpp" />
     <ClCompile Include="src\entityslayer\EntityLogger.cpp" />
     <ClCompile Include="src\entityslayer\EntityNode.cpp" />
@@ -161,6 +163,7 @@
     <ClInclude Include="src\entityslayer\EntityParser.h" />
     <ClInclude Include="src\entityslayer\GenericBlockAllocator.h" />
     <ClInclude Include="src\entityslayer\Oodle.h" />
+    <ClInclude Include="src\hash\HashLib.h" />
     <ClInclude Include="src\idlib\cleaner.h" />
     <ClInclude Include="src\idlib\deserialcore.h" />
     <ClInclude Include="src\idlib\generated\deserialgenerated.h" />
