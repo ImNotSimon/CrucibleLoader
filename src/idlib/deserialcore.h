@@ -17,6 +17,7 @@ namespace deserial {
 
 	/* Common Types */
 	void ds_pointerbase(BinaryReader& reader, std::string& writeTo);
+	void ds_pointerdecl(BinaryReader& reader, std::string& writeTo);
 	void ds_enumbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, const char*>& enumMap);
 	void ds_blockbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap);
 	void ds_structbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap);

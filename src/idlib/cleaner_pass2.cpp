@@ -8,9 +8,15 @@ struct TypeMap {
 	EntNode* node = nullptr;
 	int referenceCount = 0;
 	bool IsEntity = false;
+	bool IsDecl = false;
 
 	TypeMap() {}
 	TypeMap(EntNode* n) : node(n) {}
+};
+
+struct inheritanceFlags {
+	bool IsEntity = false;
+	bool IsDecl = false;
 };
 
 class idlibCleaner2 
@@ -23,7 +29,7 @@ class idlibCleaner2
 
 	void AddTypeMap(EntNode& typelist);
 	void CountReferences(EntNode& typelist);
-	bool IsEntity(std::string_view type);
+	bool IsChildOf(const char* className, std::string_view type);
 
 	void Build();
 	void Output();
@@ -36,21 +42,26 @@ void idlibCleaner2::AddTypeMap(EntNode& typelist) {
 	}
 }
 
-bool idlibCleaner2::IsEntity(std::string_view type) {
+bool idlibCleaner2::IsChildOf(const char* className, std::string_view type) {
 	auto pair = typelib[std::string(type)];
 	
 	EntNode* parent = &(*pair.node)["parentName"];
 	while (parent != EntNode::SEARCH_404) {
 		std::string_view parentString = parent->getValue();
-		if(parentString == "idEngineEntity")
+		if(parentString == className)
 			return true;
 			
 		
 		auto parentPair = typelib.find(std::string(parentString));
 
-		// TODO - Clean these?
-		// Unknown Parent - A few still make it in
+		/*
+		* A very small number of structs have a parent type that's
+		* not defined in the idlib - we fix these here
+		*/
 		if (parentPair == typelib.end()) {
+			
+			parser.EditText("UNDEFINED_PARENTtrue", parent, 16, false);
+			parser.PushGroupCommand();
 			//printf("UNKNOWN PARENT: %s\n", std::string(parentString).c_str());
 			return false;
 		}
@@ -88,8 +99,6 @@ void idlibCleaner2::CountReferences(EntNode& typelist)
 * - Recursively scan through these classes and mark all non-pointer variable types for inclusion
 *	- Don't need to scan through parents if we're inlining parent properties into child maps
 * - May need to add special exemption for idList variables
-* 
-* TODO: Replace Def/design/edit with a single include tag
 */
 
 void idlibCleaner2::Build() {
@@ -116,9 +125,10 @@ void idlibCleaner2::Build() {
 		AddTypeMap(*templates.ChildAt(i));
 	}
 
-	printf("Determining Entities");
+	printf("Determining Entities\n");
 	for (auto& pair : typelib) {
-		pair.second.IsEntity = IsEntity(pair.first);
+		pair.second.IsEntity = IsChildOf("idEngineEntity", pair.first);
+		pair.second.IsDecl = IsChildOf("idDecl", pair.first);
 	}
 
 	printf("Counting references \n"); // Do NOT count enums here
@@ -127,6 +137,9 @@ void idlibCleaner2::Build() {
 	for (int i = 0, max = templates.getChildCount(); i < max; i++) {
 		CountReferences(*templates.ChildAt(i));
 	}
+
+	// TODO: Must start iterating over the special template types (namely idLists)
+	// to mark their types for inclusion
 
 	// TODO FOR ENTITYSLAYER: This really exposes how horrible findPositionalId is - need to refactor
 	// it and the history system that uses it
@@ -137,11 +150,16 @@ void idlibCleaner2::Build() {
 	int includeCount = 0;
 	for (auto& pair : typelib)
 	{
-		if(pair.second.referenceCount == 0 && !pair.second.IsEntity)
-			continue;
+
+		if (pair.second.IsDecl) {
+			parser.EditTree("pointerfunc = pointerdecl", pair.second.node, 0, 0, false, false);
+		}
+
+		if (pair.second.referenceCount > 0 || pair.second.IsEntity) {
+			includeCount++;
+			parser.EditTree("INCLUDE", pair.second.node, 0, 0, false, false);
+		}
 		
-		includeCount++;
-		parser.EditTree("INCLUDE", pair.second.node, 0, 0, false, false);
 		parser.PushGroupCommand();
 	}
 	printf("%d types out of %zu should be included \n", includeCount, typelib.size());

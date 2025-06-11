@@ -121,16 +121,11 @@ class idlibCleaner {
 	std::string cleanenums = "enums {\n";
     std::string cleantemplatesubs = "templatesubs {\n";
 	std::string cleanstructs = "structs {\n";
-	std::string cleanexcludes = "exclusions {\n";
     std::unordered_map<std::string, std::string> cleantemplates;
 
 	public:
 	~idlibCleaner() {
 		delete[] text;
-	}
-
-	bool FailedRead() {
-		return text == nullptr;
 	}
 
     std::exception Error(const char* message) {
@@ -152,7 +147,7 @@ idlibCleaner::idlibCleaner() {
 	std::ifstream fstream = std::ifstream("input/idlib.h", std::ios_base::binary);
 	if (!fstream.is_open()) {
 		printf("Could not open idlib\n");
-		return;
+		assert(0);
 	}
 
 	fstream.seekg(0, std::ios_base::end);
@@ -412,7 +407,7 @@ void idlibCleaner::BuildStruct() {
         ST_SUPERTEMP = 2
     };
     StructType stype = ST_NORMAL;
-    for (int i = 0, max = tokens.size() - 1; i < max; i++) { // Last token in the vector will be colon or brace
+    for (int i = 0, max = (int)tokens.size() - 1; i < max; i++) { // Last token in the vector will be colon or brace
         TokenType ttype = tokens[i].type;
 
         if (ttype == TT_TemplateBlock) {
@@ -514,6 +509,9 @@ void idlibCleaner::BuildStruct() {
 
         tokens.clear();
 
+        /* 
+        * Parse comments preceding each variable declaration 
+        */
         {
             ParsedToken comment = Tokenize();
             if(comment.type == TT_BraceClose)
@@ -534,13 +532,14 @@ void idlibCleaner::BuildStruct() {
             else tokens.push_back(comment);
         }
 
+        /* Gather tokens */
         do {
             tokens.push_back(Tokenize());
         } while(tokens.back().type != TT_Semicolon);
 
 
         int i; /* Identify the name token, and static array if placed there*/
-        for(i = tokens.size() - 2; i > -1; i--) {
+        for(i = (int)tokens.size() - 2; i > -1; i--) {
             ParsedToken t = tokens[i];
             
             if (tokens[i].type == TT_BracketBlock) {
@@ -603,11 +602,13 @@ void idlibCleaner::BuildStruct() {
         }
 
         {
+            // Set the type string
             const char* start = tokens[0].data.data();
             ParsedToken& endToken = tokens[val.typeEndIndex];
             const char* end = endToken.data.data() + endToken.data.size();
             val.type = std::string_view(start, end - start);
 
+            // Analyze the static array token - exclude if there are non-numbers
             if (val.staticArrayIndex > -1) {
                 std::string_view brack = tokens[val.staticArrayIndex].data;
 
@@ -622,6 +623,9 @@ void idlibCleaner::BuildStruct() {
         }
 
         if(val.excluding) {
+            if(val.INCLUDE)
+                printf("Excluding value with include flags %.*s %.*s\n", (int)val.type.length(), val.type.data(), (int)val.name.length(), val.name.data());
+
             const char* start = tokens[0].data.data();
             ParsedToken& endToken = tokens[tokens.size() - 2];
             const char* end = endToken.data.data() + endToken.data.size();
@@ -725,7 +729,7 @@ void idlibCleaner::Build() {
 			break;
 		}
 	}
-	printf("Finished Cleaning idlib.\n");
+	printf("Cleaning Pass 1 Finished.\n");
 }
 
 void idlibCleaner::Write() {
@@ -753,9 +757,6 @@ void idlibCleaner::Write() {
 void idlibCleaning::Pass1()
 {
 	idlibCleaner cleaner = idlibCleaner();
-	if(cleaner.FailedRead())
-		return;
-
 	cleaner.Build();
 	cleaner.Write();
 	

@@ -2,11 +2,22 @@
 #include "io/BinaryReader.h"
 #include <cassert>
 
-void deserializer::Exec(BinaryReader& reader, std::string& writeTo) {
+void DeserialFailure(std::string writeTo, const char* error) {
+	assert(0);
+}
 
+#define checkread(VAR, MSG) { if(!reader.ReadLE(VAR)) {DeserialFailure(writeTo, MSG);}  }
+
+void deserializer::Exec(BinaryReader& reader, std::string& writeTo) {
 }
 
 void deserial::ds_pointerbase(BinaryReader& reader, std::string& writeTo)
+{
+	printf("Called ds_pointerbase - pointer function is unknown\n");
+	assert(0);
+}
+
+void deserial::ds_pointerdecl(BinaryReader& reader, std::string& writeTo)
 {
 	// We assume all pointer variables are file hashes...for simplicity 
 	uint8_t leaf;

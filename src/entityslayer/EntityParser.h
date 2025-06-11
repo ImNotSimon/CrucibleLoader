@@ -246,7 +246,7 @@ class EntityParser {
 	/*
 	* Tree Editing Operations
 	*/
-	private:
+	public:
 	
 	/*
 	* Edits a node's text without validating the contents

@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <sstream>
 #include <iostream>
+#include <chrono>
 #include "idlib/reflector.h"
 #include "idlib/cleaner.h"
 #include <unordered_map>
@@ -58,27 +59,50 @@ struct recurs {
 	recurs* derp = nullptr;
 };
 
+#define TIMESTART(ID) auto EntityProfiling_ID  = std::chrono::high_resolution_clock::now();
+
+#define TIMESTOP(ID, msg) { \
+	auto timeStop = std::chrono::high_resolution_clock::now(); \
+	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(timeStop - EntityProfiling_ID); \
+	printf("%s: %zu", msg, duration.count());\
+}
 
 int main() {
 
-	// TODO: EDIT|DESIGN|DEF - Parse commentfor these flags
+	//#define MAX 10000000
+	//
+	//uint64_t* nums = new uint64_t[MAX];
+
+	//uint64_t readto;
+
+	//BinaryReader reader = BinaryReader((char*)(nums), MAX * sizeof(uint64_t));
+
+	//TIMESTART(read)
+	//for(uint64_t i = 0; i < MAX; i++)
+	//	reader.ReadLE(readto);
+	//TIMESTOP(read, "Read Time");
+
+	//printf(" \n%zu", readto);
+
+	//uint64_t num = 1;
+	//int readTo;
+	//BinaryReader reader = BinaryReader((char*) & num, 8);
+	//reader.ReadLE(readTo);
+	//printf("%d", readTo);
 
 	//idlibCleaning::Pass1();
 	//idlibCleaning::Pass2();
-	//idlibReflection::Generate();
+	idlibReflection::Generate();
 
-	uint64_t hashTest = HashLib::FarmHash64("test", 4);
-	uint64_t result = 0x7717383daa85b5b2L;
-	printf("%d\n", hashTest == result);
+	//uint64_t hashTest = HashLib::FarmHash64("test", 4);
+	//uint64_t result = 0x7717383daa85b5b2L;
+	//printf("%d\n", hashTest == result);
 
-	std::string type = "ability_Dash";
-	std::string name = "ability_dash";
-	//uint64_t lo = HashLib::FarmHash64(type.data(), type.length());
-	//uint64_t hi = HashLib::FarmHash64(name.data(), name.length());
-	//uint64_t v10 = HashLib::FingerPrint(hi, lo);
-	uint64_t v10 = HashLib::DeclHash(type, name);
+	//std::string type = "ability_Dash";
+	//std::string name = "ability_dash";
+	//uint64_t v10 = HashLib::DeclHash(type, name);
 
-	std::cout << std::hex << std::setfill('0') << std::setw(16) << v10 << std::endl;
+	//std::cout << std::hex << std::setfill('0') << std::setw(16) << v10 << std::endl;
 
 	//recurs s = {2, new recurs{34, new recurs}}
 	//TSerializeEnum<int, testMap>();

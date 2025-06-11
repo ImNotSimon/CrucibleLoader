@@ -3,6 +3,7 @@
 #include "io/BinaryWriter.h"
 #include <set>
 #include <unordered_map>
+#include <cassert>
 
 // Don't generate reflection functions for these struct names
 // (Most likely reason is we're doing it manually for these types)
@@ -77,6 +78,7 @@ R"(#include "deserialgenerated.h"
 
 class idlibReflector {
     public:
+    std::unordered_map<std::string, EntNode*> typelib;
     std::string desheader = desHeaderStart;
     std::string descpp = desCppStart;
 
@@ -126,6 +128,67 @@ class idlibReflector {
         }
     }
 
+    void PopulateStructMap(EntNode& typeNode, int temp) {
+        EntNode& values = typeNode["values"];
+        EntNode** valueArray = values.getChildBuffer();
+        int valueCount = values.getChildCount();
+
+        for (EntNode** valIter = valueArray, **valMax = valueArray + valueCount; valIter < valMax; valIter++) {
+            EntNode& v = **valIter;
+
+            if (&v["INCLUDE"] == EntNode::SEARCH_404)
+                continue;
+
+            descpp.append("\t\t{");
+            descpp.append(std::to_string(temp++));
+            descpp.append(", {&ds_");
+
+            /* If a pointer, map to the appropriate pointer function */
+            EntNode& pointers = v["pointers"];
+            if (&pointers == EntNode::SEARCH_404) {
+                descpp.append(v.getName());
+            } 
+            else {
+                // Double pointer variables in idLists technically aren't flagged for inclusion
+                // and will be handled differently.
+                std::string_view ptrCount = pointers.getValue();
+                assert(ptrCount.length() == 1 && ptrCount[0] == '1');
+
+                auto iter = typelib.find(std::string(v.getName()));
+                assert(iter != typelib.end());
+
+                EntNode& pointerfunc = (*iter->second)["pointerfunc"];
+                if (&pointerfunc == EntNode::SEARCH_404) {
+                    descpp.append("pointerbase");
+                }
+                else {
+                    descpp.append(pointerfunc.getValue());
+                }
+            }
+
+            descpp.append(", \"");
+            descpp.append(v.getValue());
+            descpp.append("\"");
+
+            if (&v["array"] != EntNode::SEARCH_404) {
+                descpp.append(", ");
+                descpp.append(v["array"].getValue());
+            }
+
+
+            descpp.append("}},\n");
+        }
+
+        EntNode& parentName = typeNode["parentName"];
+        if (&parentName != EntNode::SEARCH_404) {
+            auto iter = typelib.find(std::string(parentName.getValue()));
+            assert(iter != typelib.end());
+            EntNode* parentType = iter->second;
+
+            PopulateStructMap(*parentType, temp);
+        }
+    }
+
     void GenerateStruct(EntNode& structs) {
 
         EntNode** structArray = structs.getChildBuffer();
@@ -134,6 +197,8 @@ class idlibReflector {
         for (EntNode** structIter = structArray, **structMax = structArray + structCount; structIter < structMax; structIter++)
         {
             EntNode& current = **structIter;
+
+            /* Exclude hard-coded structs from reflection generation */
             if (HandcodedStructs.find(std::string(current.getName())) != HandcodedStructs.end()) {
                 continue;
             }
@@ -149,68 +214,48 @@ class idlibReflector {
             descpp.append("(BinaryReader& reader, std::string& writeTo) {\n");
             descpp.append("\tconst std::unordered_map<uint64_t, deserializer> propMap = {\n");
 
-
-            EntNode& values = current["values"];
-            EntNode** valueArray = values.getChildBuffer();
-            int valueCount = values.getChildCount();
-
-            int temp = 0;
-            for (EntNode** valIter = valueArray, **valMax = valueArray + valueCount; valIter < valMax; valIter++) {
-                EntNode& v = **valIter;
-
-                if(&v["INCLUDE"] == EntNode::SEARCH_404)
-                    continue;
-
-                descpp.append("\t\t{");
-                descpp.append(std::to_string(temp++));
-                descpp.append(", {&ds_");
-                descpp.append(v.getName());
-
-                descpp.append(", \"");
-                descpp.append(v.getValue());
-                descpp.append("\"");
-
-                if (&v["array"] != EntNode::SEARCH_404) {
-                    descpp.append(", ");
-                    descpp.append(v["array"].getValue());
-                }
-                
-
-                descpp.append("}},\n");
-            }
-
+            PopulateStructMap(current, 0);
             descpp.append("\t};\n\tds_structbase(reader, writeTo, propMap);\n");
             descpp.append("}\n");
         }
-
-        ///* Exclude hard-coded structs from reflection generation */
-        //if (HandcodedStructs.find(std::string(structData.name)) != HandcodedStructs.end()) {
-        //    return;
-        //}            
-
-        ///* Begin In-Depth Analysis of Types */
-        //if (structData.name._Starts_with("idDecl")) {
-        //    structData.exclude = true;
-        //}
-
-
-
         ///* Generate Reflection Code */
-
-
 
         //if (structData.exclude) {
         //    descpp.append("\t#ifdef _DEBUG\n\tassert(0);\n\t#endif\n");
         //}
-        
+    }
+
+
+    void AddTypeMap(EntNode& typelist) {
+        for (int i = 0, max = typelist.getChildCount(); i < max; i++) {
+            EntNode* n = typelist.ChildAt(i);
+            typelib.emplace(n->getName(), n);
+        }
     }
 
     void Generate(EntNode& root) {
-        GenerateEnums(root["enums"]);
-        GenerateStruct(root["structs"]);
-        GenerateStruct(root["templatesubs"]);
-
+        EntNode& enums = root["enums"];
+        EntNode& structs = root["structs"];
+        EntNode& templatesubs = root["templatesubs"];
         EntNode& templates = root["templates"];
+
+        assert(&enums != EntNode::SEARCH_404);
+        assert(&structs != EntNode::SEARCH_404);
+        assert(&templatesubs != EntNode::SEARCH_404);
+        assert(&templates != EntNode::SEARCH_404);
+
+        /* Build Type Lib */
+        typelib.reserve(25000);
+        AddTypeMap(enums);
+        AddTypeMap(structs);
+        AddTypeMap(templatesubs);
+        for (int i = 0, max = templates.getChildCount(); i < max; i++) {
+            AddTypeMap(*templates.ChildAt(i));
+        }
+
+        GenerateEnums(enums);
+        GenerateStruct(structs);
+        GenerateStruct(templatesubs);
         for (int i = 0, max = templates.getChildCount(); i < max; i++) {
             GenerateStruct(*templates.ChildAt(i));
         }

@@ -1,5 +1,7 @@
 #include "BinaryReader.h"
 #include <fstream>
+#include <string>
+//#include <fstream>
 
 BinaryReader::BinaryReader(const BinaryReader& b) {
 	SetBuffer(b.buffer, b.length);
@@ -86,27 +88,20 @@ bool BinaryReader::ReachedEOF() const
 	return pos == length;
 }
 
-void BinaryReader::Goto(const size_t newPos)
+bool BinaryReader::Goto(const size_t newPos)
 {
 	if(newPos > length)
-		throw IndexOOBException();
+		return false;
 	pos = newPos;
+	return true;
 }
 
-void BinaryReader::GoRight(const size_t shiftAmount)
+bool BinaryReader::GoRight(const size_t shiftAmount)
 {
 	if(pos + shiftAmount > length)
-		throw IndexOOBException();
+		return false;
 	pos += shiftAmount;
-}
-
-void BinaryReader::ReadBytes(char* writeTo, const size_t numBytes)
-{
-	if(pos + numBytes > length)
-		throw IndexOOBException();
-
-	for(size_t i = 0; i < numBytes; i++)
-		writeTo[i] = buffer[pos++];
+	return true;
 }
 
 char* BinaryReader::ReadCString()
@@ -123,7 +118,7 @@ char* BinaryReader::ReadCString()
 		}
 	}
 	if(!foundNull)
-		throw IndexOOBException();
+		return nullptr;
 
 	// Copy the string into a new buffer
 	size_t length = inc - pos;
@@ -150,7 +145,7 @@ wchar_t* BinaryReader::ReadWCStringLE()
 		} else inc++;
 	}
 	if(!foundNull)
-		throw IndexOOBException();
+		return nullptr;
 
 	// Copy the string into a new buffer
 	size_t length = (inc - pos) / 2;

@@ -1,8 +1,6 @@
 #include <string>
 #include <fstream>
 
-class IndexOOBException : public std::exception {};
-
 class BinaryReader
 {
 	private:
@@ -45,58 +43,114 @@ class BinaryReader
 	// =====
 	size_t Position() const;
 	bool ReachedEOF() const;
-	void Goto(const size_t newPos);
-	void GoRight(const size_t shiftAmount);
-	void ReadBytes(char* writeTo, const size_t numBytes);
+	bool Goto(const size_t newPos);
+	bool GoRight(const size_t shiftAmount);
+
+
+	/*
+	* Reading Functions
+	*/
 
 	char* ReadCString();
 	wchar_t* ReadWCStringLE();
 
-	template<typename T>
-	void ReadLE(T& readTo)
+	bool ReadBytes(char* writeTo, const size_t numBytes)
 	{
-		// Determine number of bytes to read
-		constexpr size_t numBytes = sizeof(T);
 		if (pos + numBytes > length)
-			throw IndexOOBException();
+			return false;
 
-		// Read the bytes into the value
-		T value = 0;
-		for (size_t i = 0, max = numBytes * 8; i < max; i += 8) {
-			T temp = static_cast<unsigned char>(buffer[pos++]);
+		memcpy(writeTo, buffer + pos, numBytes);
+		pos += numBytes;
+		return true;
+	}
 
-			// Literal expression overflows for > 32 bits if we don't shift on a temp variable
-			// This ensures it works for 64 bits. TODO: research and find a better solution
-			temp = temp << i; 
-			value += temp;
+	bool ReadLE(int8_t& readTo)
+	{
+		if(pos + 1 > length)
+			return false;
+		readTo = buffer[pos++];
+		return true;
+	}
+
+	bool ReadLE(uint8_t& readTo)
+	{
+		if(pos + 1 > length)
+			return false;
+		readTo = *reinterpret_cast<unsigned char*>(buffer + pos++);
+		return true;
+	}
+
+	bool ReadLE(uint16_t& readTo) {
+		if(pos + 2 > length)
+			return false;
+		
+		readTo = _byteswap_ushort( *reinterpret_cast<uint16_t*>(buffer + pos));
+		pos += 2;
+		return true;
+	}
+
+	bool ReadLE(int16_t& readTo) {
+		uint16_t u;
+		if (ReadLE(u)) {
+			readTo = *reinterpret_cast<int16_t*>(&u);
+			return true;
 		}
-
-		readTo = value;
+		return false;
 	}
 
-	template<>
-	void ReadLE(float& readTo)
+	bool ReadLE(uint32_t& readTo)
 	{
-		union {
-			uint32_t i = 0;
-			float f;
-			static_assert(sizeof(float) == sizeof(uint32_t));
-		} binaryCast;
+		if (pos + 4 > length)
+			return false;
 
-		ReadLE(binaryCast.i);
-		readTo = binaryCast.f;
+		readTo = _byteswap_ulong(*reinterpret_cast<uint32_t*>(buffer + pos));
+		pos += 4;
+		return true;
 	}
 
-	template<>
-	void ReadLE(double& readTo)
-	{
-		union {
-			uint64_t i = 0;
-			double d;
-			static_assert(sizeof(double) == sizeof(uint64_t));
-		} binaryCast;
+	bool ReadLE(int32_t& readTo) {
+		uint32_t u;
+		if (ReadLE(u)) {
+			readTo = *reinterpret_cast<int32_t*>(&u);
+			return true;
+		}
+		return false;
+		
+	}
 
-		ReadLE(binaryCast.i);
-		readTo = binaryCast.d;
+	bool ReadLE(uint64_t& readTo) {
+		if (pos + 8 > length)
+			return false;
+
+		readTo = _byteswap_uint64(*reinterpret_cast<uint64_t*>(buffer + pos));
+		pos += 8;
+		return true;
+	}
+
+	bool ReadLE(int64_t& readTo) {
+		uint64_t u;
+		if (ReadLE(u)) {
+			readTo = *reinterpret_cast<int64_t*>(&u);
+			return true;
+		}
+		return false;
+	}
+
+	bool ReadLE(float& readTo) {
+		uint32_t u;
+		if (ReadLE(u)) {
+			readTo = *reinterpret_cast<float*>(&u);
+			return true;
+		}
+		return false;
+	}
+
+	bool ReadLE(double& readTo) {
+		uint64_t u;
+		if (ReadLE(u)) {
+			readTo = *reinterpret_cast<double*>(&u);
+			return true;
+		}
+		return false;
 	}
 };
