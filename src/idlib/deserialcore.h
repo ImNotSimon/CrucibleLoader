@@ -15,14 +15,17 @@ struct deserializer {
 
 namespace deserial {
 
+	/* Entry Points */
+	void ds_start_entitydef(BinaryReader& reader, std::string& writeTo);
+
 	/* Common Types */
 	void ds_pointerbase(BinaryReader& reader, std::string& writeTo);
 	void ds_pointerdecl(BinaryReader& reader, std::string& writeTo);
 	void ds_enumbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, const char*>& enumMap);
 	void ds_blockbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap);
 	void ds_structbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap);
-	void ds_idList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string writeTo));
-	void ds_staticList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string writeTo));
+	void ds_idList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string& writeTo));
+	void ds_staticList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string& writeTo));
 	
 
 

@@ -4,6 +4,7 @@
 #include <chrono>
 #include "idlib/reflector.h"
 #include "idlib/cleaner.h"
+#include "idlib/deserialcore.h"
 #include <unordered_map>
 #include "io/BinaryWriter.h"
 #include "io/BinaryReader.h"
@@ -28,36 +29,36 @@
 //	writer.WriteLE(value);
 //}
 
-void testfunc(BinaryReader& reader, std::string& writeto) {
-	std::cout << "test func called";
-}
-
-enum deserialFlags {
-	deserial_staticlist = 1 << 0,
-	deserial_idlist    = 1 << 1
-};
-
-struct deserializer {
-	void (*callback)(BinaryReader& reader, std::string& writeto) = nullptr;
-	const char* name = nullptr;
-	int arraylength = 0;
-
-	void Exec(BinaryReader& reader, std::string& writeTo) {
-
-		if (arraylength > 0) {
-			// Call static array function
-		}
-		writeTo.append(name);
-		writeTo.append(" = ");
-		callback(reader, writeTo);
-		writeTo.append(";\n");
-	}
-};
-
-struct recurs {
-	int i = 0;
-	recurs* derp = nullptr;
-};
+//void testfunc(BinaryReader& reader, std::string& writeto) {
+//	std::cout << "test func called";
+//}
+//
+//enum deserialFlags {
+//	deserial_staticlist = 1 << 0,
+//	deserial_idlist    = 1 << 1
+//};
+//
+//struct deserializer {
+//	void (*callback)(BinaryReader& reader, std::string& writeto) = nullptr;
+//	const char* name = nullptr;
+//	int arraylength = 0;
+//
+//	void Exec(BinaryReader& reader, std::string& writeTo) {
+//
+//		if (arraylength > 0) {
+//			// Call static array function
+//		}
+//		writeTo.append(name);
+//		writeTo.append(" = ");
+//		callback(reader, writeTo);
+//		writeTo.append(";\n");
+//	}
+//};
+//
+//struct recurs {
+//	int i = 0;
+//	recurs* derp = nullptr;
+//};
 
 #define TIMESTART(ID) auto EntityProfiling_ID  = std::chrono::high_resolution_clock::now();
 
@@ -67,33 +68,25 @@ struct recurs {
 	printf("%s: %zu", msg, duration.count());\
 }
 
-int main() {
+void deserialTest() {
+	const char* dir = "D:/Modding/dark ages/decls/entitydef/";
+	
+	int i = 0;
+	for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
+		//std::cout << entry.path() << '\n';
+		if(++i % 100 == 0)
+			printf("%d\n", i);
 
-	//#define MAX 10000000
-	//
-	//uint64_t* nums = new uint64_t[MAX];
+		if(entry.is_directory())
+			continue;
 
-	//uint64_t readto;
+		BinaryReader reader = BinaryReader(entry.path().string());
+		std::string derp;
+		deserial::ds_start_entitydef(reader, derp);
+	}
+}
 
-	//BinaryReader reader = BinaryReader((char*)(nums), MAX * sizeof(uint64_t));
-
-	//TIMESTART(read)
-	//for(uint64_t i = 0; i < MAX; i++)
-	//	reader.ReadLE(readto);
-	//TIMESTOP(read, "Read Time");
-
-	//printf(" \n%zu", readto);
-
-	//uint64_t num = 1;
-	//int readTo;
-	//BinaryReader reader = BinaryReader((char*) & num, 8);
-	//reader.ReadLE(readTo);
-	//printf("%d", readTo);
-
-	//idlibCleaning::Pass1();
-	//idlibCleaning::Pass2();
-	idlibReflection::Generate();
-
+void HashTests() {
 	//uint64_t hashTest = HashLib::FarmHash64("test", 4);
 	//uint64_t result = 0x7717383daa85b5b2L;
 	//printf("%d\n", hashTest == result);
@@ -103,6 +96,18 @@ int main() {
 	//uint64_t v10 = HashLib::DeclHash(type, name);
 
 	//std::cout << std::hex << std::setfill('0') << std::setw(16) << v10 << std::endl;
+}
+
+void GenerateIdlib() {
+	//idlibCleaning::Pass1();
+	idlibCleaning::Pass2();
+	idlibReflection::Generate();
+}
+
+int main() {
+
+	//deserialTest();
+	//GenerateIdlib();
 
 	//recurs s = {2, new recurs{34, new recurs}}
 	//TSerializeEnum<int, testMap>();
@@ -120,30 +125,6 @@ int main() {
 
 
 	// OLD
-
-	//const char* dir = "D:/Modding/dark ages/decls/entitydef/";
-	//
-	//for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-	//	//std::cout << entry.path() << '\n';
-
-	//	if(entry.is_directory())
-	//		continue;
-
-	//	BinaryReader reader = BinaryReader(entry.path().string());
-	//	
-
-	//	try {
-	//		reader.Goto(0x0D);
-	//		uint16_t padding;
-	//		reader.ReadLE(padding);
-
-	//		if (padding != 0x0101)
-	//			std::cout << entry.path();
-	//	}
-	//	catch (IndexOOBException) {
-	//		printf("Index OOB %s\n",entry.path().string().data());
-	//	}
-	//}
 
 	//float f = 234.34236435234;
 	//std::ostringstream test;

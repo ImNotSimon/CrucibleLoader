@@ -11,6 +11,66 @@ void DeserialFailure(std::string writeTo, const char* error) {
 void deserializer::Exec(BinaryReader& reader, std::string& writeTo) {
 }
 
+void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo)
+{
+	uint8_t bytecode;
+	uint32_t filelength;
+	uint64_t inherits;
+
+	assert(reader.ReadLE(bytecode));
+	assert(bytecode == 0);
+	assert(reader.ReadLE(filelength));
+	assert(filelength == reader.Remaining());
+	assert(reader.ReadLE(inherits));
+	
+	// In map entities this byte is 0
+	assert(reader.ReadLE(bytecode));
+	assert(bytecode == 1);
+
+	//assert(reader.ReadLE(bytecode));
+	//assert(bytecode == 1);
+	//
+	//assert(reader.ReadLE(filelength));
+	//assert(filelength == 0);
+	//assert(reader.ReadLE(filelength));
+	//assert(reader.GoRight(filelength));
+
+	while (reader.Remaining() > 0) {
+		assert(reader.ReadLE(bytecode));
+
+		if (bytecode == 0) {
+			assert(reader.ReadLE(filelength));
+
+			if (filelength > 0) {
+				assert(reader.ReadLE(bytecode));
+				assert(bytecode == 1 || bytecode == 'e');
+				assert(reader.GoRight(filelength - 1));
+			}
+
+			//assert(reader.GoRight(filelength));
+
+		}
+		else if (bytecode == 1) {
+			assert(reader.ReadLE(filelength));
+			assert(filelength == 0);
+
+			assert(reader.ReadLE(filelength));
+
+			if (filelength > 0) {
+				assert(reader.ReadLE(bytecode));
+				assert(bytecode == 0 || bytecode == 1);
+				assert(reader.GoRight(filelength - 1));
+			}
+
+			//assert(reader.GoRight(filelength));
+		}
+		else {
+			assert(0);
+		}
+	}
+	
+}
+
 void deserial::ds_pointerbase(BinaryReader& reader, std::string& writeTo)
 {
 	printf("Called ds_pointerbase - pointer function is unknown\n");
@@ -93,11 +153,12 @@ void deserial::ds_structbase(BinaryReader& reader, std::string& writeTo, const s
 
 }
 
-void deserial::ds_idList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string writeTo))
+void deserial::ds_idList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string& writeTo))
 {
+	
 }
 
-void deserial::ds_staticList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string writeTo))
+void deserial::ds_staticList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string& writeTo))
 {
 }
 

@@ -35,6 +35,9 @@ class BinaryReader
 	bool InitSuccessful();
 	char* GetBuffer();
 	size_t GetLength();
+	size_t Remaining() const {
+		return length - pos;
+	}
 
 	void DebugLogState();
 
@@ -84,7 +87,8 @@ class BinaryReader
 		if(pos + 2 > length)
 			return false;
 		
-		readTo = _byteswap_ushort( *reinterpret_cast<uint16_t*>(buffer + pos));
+		readTo = *reinterpret_cast<uint16_t*>(buffer + pos);
+		//readTo = _byteswap_ushort( *reinterpret_cast<uint16_t*>(buffer + pos));
 		pos += 2;
 		return true;
 	}
@@ -103,7 +107,8 @@ class BinaryReader
 		if (pos + 4 > length)
 			return false;
 
-		readTo = _byteswap_ulong(*reinterpret_cast<uint32_t*>(buffer + pos));
+		readTo = *reinterpret_cast<uint32_t*>(buffer + pos);
+		//readTo = _byteswap_ulong(*reinterpret_cast<uint32_t*>(buffer + pos));
 		pos += 4;
 		return true;
 	}
@@ -122,7 +127,8 @@ class BinaryReader
 		if (pos + 8 > length)
 			return false;
 
-		readTo = _byteswap_uint64(*reinterpret_cast<uint64_t*>(buffer + pos));
+		readTo = *reinterpret_cast<uint64_t*>(buffer + pos);
+		//readTo = _byteswap_uint64(*reinterpret_cast<uint64_t*>(buffer + pos));
 		pos += 8;
 		return true;
 	}

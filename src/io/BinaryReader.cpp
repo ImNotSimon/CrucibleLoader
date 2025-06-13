@@ -98,8 +98,11 @@ bool BinaryReader::Goto(const size_t newPos)
 
 bool BinaryReader::GoRight(const size_t shiftAmount)
 {
-	if(pos + shiftAmount > length)
+	if (pos + shiftAmount > length) {
+		//printf("%zu %zu %zu %zu\n", pos, shiftAmount, pos + shiftAmount, length);
 		return false;
+	}
+				
 	pos += shiftAmount;
 	return true;
 }

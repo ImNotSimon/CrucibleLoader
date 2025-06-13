@@ -9,6 +9,7 @@ struct TypeMap {
 	int referenceCount = 0;
 	bool IsEntity = false;
 	bool IsDecl = false;
+	bool forceInlude = false;
 
 	TypeMap() {}
 	TypeMap(EntNode* n) : node(n) {}
@@ -30,6 +31,7 @@ class idlibCleaner2
 	void AddTypeMap(EntNode& typelist);
 	void CountReferences(EntNode& typelist);
 	bool IsChildOf(const char* className, std::string_view type);
+	void RecurseTemplates();
 
 	void Build();
 	void Output();
@@ -84,6 +86,13 @@ void idlibCleaner2::CountReferences(EntNode& typelist)
 			if(&value["INCLUDE"] == EntNode::SEARCH_404)
 				continue;
 
+			// TODO: MONITOR TO ENSURE THIS IS ACCEPTABLE
+			// Interestingly, this only makes a mere ~6000 line difference
+			// To truly cull unnecessary stuff we would need to rewrite the
+			// reference counter to only include things directly referenced by entity classes
+			if(&value["pointers"] != EntNode::SEARCH_404)
+				continue;
+
 			// Need to check for types not defined in the idlib
 			auto pair = typelib.find(std::string(value.getName()));
 			if (pair != typelib.end()) {
@@ -100,6 +109,60 @@ void idlibCleaner2::CountReferences(EntNode& typelist)
 *	- Don't need to scan through parents if we're inlining parent properties into child maps
 * - May need to add special exemption for idList variables
 */
+
+void idlibCleaner2::RecurseTemplates() {
+	EntNode& templates = (*parser.getRoot())["templates"];
+	printf("Executing RecurseTemplates\n");
+	
+	// idListBase variables have no tags. 
+	// We must forcibly iterate over the list variable's type and include it if missing
+	// Have to fetch the idListBase from the child idList because it's only the latter
+	// that are included
+	EntNode& idLists = templates["idList"];
+	assert(&idLists != EntNode::SEARCH_404);
+
+	bool includedThisRun = false;
+
+	for (int i = 0, max = idLists.getChildCount(); i < max; i++) {
+		EntNode& list = *idLists.ChildAt(i);
+
+		// Skip idLists which are not included
+		auto iter = typelib.find(std::string(list.getName()));
+		assert(iter != typelib.end());
+		if(iter->second.referenceCount == 0 && !iter->second.forceInlude)
+			continue;
+
+		// Get the parent idListBase
+		EntNode& basename = list["parentName"];
+		iter = typelib.find(std::string(basename.getValue()));
+		assert(iter != typelib.end());
+
+		// Get the type stored by the list
+		EntNode& baselist = *iter->second.node;
+		EntNode& listtype = *baselist["values"].ChildAt(0);
+		
+		bool mustInclude;
+		{
+			std::string_view pointerCount = listtype["pointers"].getValue();
+			assert(pointerCount.length() == 1);
+			mustInclude = pointerCount[0] == '1';
+		}
+
+		if (mustInclude) {
+			iter = typelib.find(std::string(listtype.getName()));
+			assert(iter != typelib.end());
+
+			if (!iter->second.forceInlude) {
+				iter->second.forceInlude = true;
+				includedThisRun = true;
+			}
+		}
+	}
+
+	if(includedThisRun)
+		RecurseTemplates();
+
+}
 
 void idlibCleaner2::Build() {
 
@@ -138,8 +201,8 @@ void idlibCleaner2::Build() {
 		CountReferences(*templates.ChildAt(i));
 	}
 
-	// TODO: Must start iterating over the special template types (namely idLists)
-	// to mark their types for inclusion
+	//printf("Iterating over special types\n");
+	RecurseTemplates();
 
 	// TODO FOR ENTITYSLAYER: This really exposes how horrible findPositionalId is - need to refactor
 	// it and the history system that uses it
@@ -155,7 +218,7 @@ void idlibCleaner2::Build() {
 			parser.EditTree("pointerfunc = pointerdecl", pair.second.node, 0, 0, false, false);
 		}
 
-		if (pair.second.referenceCount > 0 || pair.second.IsEntity) {
+		if (pair.second.referenceCount > 0 || pair.second.IsEntity || pair.second.forceInlude) {
 			includeCount++;
 			parser.EditTree("INCLUDE", pair.second.node, 0, 0, false, false);
 		}

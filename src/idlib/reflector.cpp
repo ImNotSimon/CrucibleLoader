@@ -31,35 +31,6 @@ const std::unordered_map<std::string, const char*> AliasStructs = {
 };
 
 
-struct ParsedEnumValue {
-    std::string_view name;
-    std::string_view value;
-};
-
-struct ParsedEnum {
-    std::string_view comment;
-    std::string_view name;
-    std::string_view basetype;
-    std::vector<ParsedEnumValue> values;
-};
-
-struct ParsedStructValue {
-    std::string_view type;
-    std::string_view name;
-    bool exclude = false;
-    bool isPointer = false;
-};
-
-struct ParsedStruct {
-    std::string_view name = "";
-    std::string_view parent = "";
-    std::vector<ParsedStructValue> values;
-    bool exclude = false;
-};
-
-struct ParsedIdlib {
-    std::vector<ParsedEnum> enums;
-};
 
 const char* desHeaderStart =
 R"(#include <string>
@@ -78,6 +49,13 @@ R"(#include "deserialgenerated.h"
 
 class idlibReflector {
     public:
+    // 
+    const std::unordered_map<std::string, void(idlibReflector::*)(EntNode&)> SpecialTemplates = {
+        {"idList", &idlibReflector::GenerateidList},
+        {"idListBase", &idlibReflector::GenerateidListBase}
+    };
+
+
     std::unordered_map<std::string, EntNode*> typelib;
     std::string desheader = desHeaderStart;
     std::string descpp = desCppStart;
@@ -128,6 +106,19 @@ class idlibReflector {
         }
     }
 
+    void WritePointerFunc(std::string_view typeName) {
+        auto iter = typelib.find(std::string(typeName));
+        assert(iter != typelib.end());
+
+        EntNode& pointerfunc = (*iter->second)["pointerfunc"];
+        if (&pointerfunc == EntNode::SEARCH_404) {
+            descpp.append("pointerbase");
+        }
+        else {
+            descpp.append(pointerfunc.getValue());
+        }
+    }
+
     void PopulateStructMap(EntNode& typeNode, int temp) {
         EntNode& values = typeNode["values"];
         EntNode** valueArray = values.getChildBuffer();
@@ -154,16 +145,7 @@ class idlibReflector {
                 std::string_view ptrCount = pointers.getValue();
                 assert(ptrCount.length() == 1 && ptrCount[0] == '1');
 
-                auto iter = typelib.find(std::string(v.getName()));
-                assert(iter != typelib.end());
-
-                EntNode& pointerfunc = (*iter->second)["pointerfunc"];
-                if (&pointerfunc == EntNode::SEARCH_404) {
-                    descpp.append("pointerbase");
-                }
-                else {
-                    descpp.append(pointerfunc.getValue());
-                }
+                WritePointerFunc(v.getName());
             }
 
             descpp.append(", \"");
@@ -189,7 +171,9 @@ class idlibReflector {
         }
     }
 
-    void GenerateStruct(EntNode& structs) {
+    // bodyFunction is used for special template types that we need to generate non-standard
+    // reflection code for (like idLists)
+    void GenerateStruct(EntNode& structs, void(idlibReflector::*bodyFunction)(EntNode&) = nullptr) {
 
         EntNode** structArray = structs.getChildBuffer();
         int structCount = structs.getChildCount();
@@ -212,10 +196,16 @@ class idlibReflector {
             descpp.append("void deserial::ds_");
             descpp.append(current.getName());
             descpp.append("(BinaryReader& reader, std::string& writeTo) {\n");
-            descpp.append("\tconst std::unordered_map<uint64_t, deserializer> propMap = {\n");
 
-            PopulateStructMap(current, 0);
-            descpp.append("\t};\n\tds_structbase(reader, writeTo, propMap);\n");
+            if (bodyFunction == nullptr) {
+                descpp.append("\tconst std::unordered_map<uint64_t, deserializer> propMap = {\n");
+                PopulateStructMap(current, 0);
+                descpp.append("\t};\n\tds_structbase(reader, writeTo, propMap);\n");
+            }
+            else {
+                (this->*bodyFunction)(current);
+            }
+
             descpp.append("}\n");
         }
         ///* Generate Reflection Code */
@@ -223,6 +213,43 @@ class idlibReflector {
         //if (structData.exclude) {
         //    descpp.append("\t#ifdef _DEBUG\n\tassert(0);\n\t#endif\n");
         //}
+    }
+    
+    void GenerateidList(EntNode& typenode) {
+        // Get the parent type
+        EntNode& parentName = typenode["parentName"];
+        auto iter = typelib.find(std::string(parentName.getValue()));
+        assert(iter != typelib.end());
+        EntNode& parentnode = *iter->second;
+
+        // The first value in idListBase is what the list stores
+        EntNode& listType = *parentnode["values"].ChildAt(0);
+        assert(&listType != EntNode::SEARCH_404);
+        
+        bool usePointerFunc;
+        {
+            std::string_view pointerCount = listType["pointers"].getValue();
+            assert(pointerCount.length() == 1 && (pointerCount[0] == '1' || pointerCount[0] == '2'));
+            
+            usePointerFunc = pointerCount[0] == '2';
+        }
+
+        descpp.append("\tds_idList(reader, writeTo, &ds_");
+        
+        if (usePointerFunc) {
+            WritePointerFunc(listType.getName());
+        }
+        else {
+            descpp.append(listType.getName());
+        }
+        descpp.append(");\n");
+
+        //printf("%.*s\n", (int)listType.getName().length(), listType.getName().data());   
+    }
+
+    void GenerateidListBase(EntNode& typenode) {
+        // idListBase should never actually be included, only idList
+        assert(0);
     }
 
 
@@ -257,7 +284,16 @@ class idlibReflector {
         GenerateStruct(structs);
         GenerateStruct(templatesubs);
         for (int i = 0, max = templates.getChildCount(); i < max; i++) {
-            GenerateStruct(*templates.ChildAt(i));
+
+            EntNode* t = templates.ChildAt(i);
+            auto iter = SpecialTemplates.find(std::string(t->getName()));
+            if (iter == SpecialTemplates.end()) {
+                GenerateStruct(*t);
+            }
+            else {
+                GenerateStruct(*t, iter->second);
+            }
+            
         }
     }
 
