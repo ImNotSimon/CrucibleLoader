@@ -1,95 +1,121 @@
 #include <string>
-#include <fstream>
 
 class BinaryReader
 {
 	private:
-	bool ownsBuffer = false;
-	char* buffer = nullptr;
-	size_t length = 0;
-	size_t pos = 0;
+	const char* buffer = nullptr;
+	const char* next = nullptr;
+	const char* max = nullptr;
 
 	public:
-	void ClearState() {
-		if (ownsBuffer)
-			delete[] buffer;
-		ownsBuffer = false;
-		buffer = nullptr;
-		length = 0;
-		pos = 0;
+
+	BinaryReader() {}
+	BinaryReader(const char* p_buffer, size_t length) : buffer(p_buffer), next(p_buffer), max(p_buffer + length) {}
+
+	void SetBuffer(const char* p_buffer, size_t length) {
+		buffer = p_buffer;
+		next = p_buffer;
+		max = p_buffer + length;
 	}
 
-	~BinaryReader() {
-		if (ownsBuffer)
-			delete[] buffer;
+	/*
+	* Accessors
+	*/
+
+	bool InitSuccessful() const {
+		return buffer != nullptr;
 	}
 
-	BinaryReader() {
-	}
-	BinaryReader(const BinaryReader& b);
-	BinaryReader(const std::string& path);
-	BinaryReader(char* p_buffer, size_t p_length);
-	bool SetBuffer(const std::string& path);
-	bool SetBuffer(std::ifstream& stream, size_t startAt, size_t expectedLength);
-	void SetBuffer(char* p_buffer, size_t p_length);
-	bool InitSuccessful();
-	char* GetBuffer();
-	size_t GetLength();
-	size_t Remaining() const {
-		return length - pos;
+	const char* GetBuffer() const {
+		return buffer;
 	}
 
-	void DebugLogState();
+	const char* GetNext() const {
+		return next;
+	}
 
-	// =====
-	// Reading
-	// =====
-	size_t Position() const;
-	bool ReachedEOF() const;
-	bool Goto(const size_t newPos);
-	bool GoRight(const size_t shiftAmount);
+	size_t GetLength() const {
+		return max - buffer;
+	};
+
+	size_t GetPosition() const {
+		return next - buffer;
+	}
+
+	size_t GetRemaining() const {
+		return max - next;
+	}
+
+	bool ReachedEOF() const {
+		return next == max;
+	}
+
+	void DebugLogState() const;
+
+
+	/*
+	* Navigation
+	*/
+	
+	bool Goto(const size_t newPos)
+	{
+		if (buffer + newPos > max)
+			return false;
+		next = buffer + newPos;
+		return true;
+	}
+
+	bool GoRight(const size_t shiftAmount)
+	{
+		if (next + shiftAmount > max) {
+			//printf("%zu %zu %zu %zu\n", pos, shiftAmount, pos + shiftAmount, length);
+			return false;
+		}
+
+		next += shiftAmount;
+		return true;
+	}
 
 
 	/*
 	* Reading Functions
 	*/
 
-	char* ReadCString();
-	wchar_t* ReadWCStringLE();
-
-	bool ReadBytes(char* writeTo, const size_t numBytes)
+	bool ReadBytes(const char*& writeTo, const size_t numBytes)
 	{
-		if (pos + numBytes > length)
+		if (next + numBytes > max)
 			return false;
 
-		memcpy(writeTo, buffer + pos, numBytes);
-		pos += numBytes;
+		writeTo = next;
+		next += numBytes;
 		return true;
 	}
 
 	bool ReadLE(int8_t& readTo)
 	{
-		if(pos + 1 > length)
+		if(next + 1 > max)
 			return false;
-		readTo = buffer[pos++];
+		readTo = *next;
+		next++;
 		return true;
 	}
 
 	bool ReadLE(uint8_t& readTo)
 	{
-		if(pos + 1 > length)
+		if(next + 1 > max)
 			return false;
-		readTo = *reinterpret_cast<unsigned char*>(buffer + pos++);
+		readTo = *reinterpret_cast<const unsigned char*>(next);
+		next++;
 		return true;
 	}
 
 	bool ReadLE(uint16_t& readTo) {
-		if(pos + 2 > length)
+		if(next + 2 > max)
 			return false;
 		
-		readTo = *reinterpret_cast<uint16_t*>(buffer + pos);
+		readTo = *reinterpret_cast<const uint16_t*>(next);
 		//readTo = _byteswap_ushort( *reinterpret_cast<uint16_t*>(buffer + pos));
-		pos += 2;
+		next += 2;
 		return true;
 	}
 
@@ -104,12 +130,12 @@ class BinaryReader
 
 	bool ReadLE(uint32_t& readTo)
 	{
-		if (pos + 4 > length)
+		if (next + 4 > max)
 			return false;
 
-		readTo = *reinterpret_cast<uint32_t*>(buffer + pos);
+		readTo = *reinterpret_cast<const uint32_t*>(next);
 		//readTo = _byteswap_ulong(*reinterpret_cast<uint32_t*>(buffer + pos));
-		pos += 4;
+		next += 4;
 		return true;
 	}
 
@@ -124,12 +150,12 @@ class BinaryReader
 	}
 
 	bool ReadLE(uint64_t& readTo) {
-		if (pos + 8 > length)
+		if (next + 8 > max)
 			return false;
 
-		readTo = *reinterpret_cast<uint64_t*>(buffer + pos);
+		readTo = *reinterpret_cast<const uint64_t*>(next);
 		//readTo = _byteswap_uint64(*reinterpret_cast<uint64_t*>(buffer + pos));
-		pos += 8;
+		next += 8;
 		return true;
 	}
 
@@ -158,5 +184,29 @@ class BinaryReader
 			return true;
 		}
 		return false;
+	}
+};
+
+class BinaryOpener {
+	private:
+	char* buffer = nullptr;
+	size_t length = 0;
+
+	public:
+	BinaryOpener(const std::string& path);
+
+	BinaryOpener(const BinaryOpener& b) = delete;
+	void operator=(const BinaryOpener& b) = delete;
+
+	~BinaryOpener() {
+		delete[] buffer;
+	}
+
+	bool Okay() const {
+		return buffer != nullptr;
+	}
+
+	BinaryReader ToReader() {
+		return BinaryReader(buffer, length);
 	}
 };

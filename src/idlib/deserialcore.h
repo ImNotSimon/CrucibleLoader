@@ -10,7 +10,7 @@ struct deserializer {
 	const char* name = nullptr;
 	int arrayLength = 0; // If > 0, treat this as a static array
 
-	void Exec(BinaryReader& reader, std::string& writeTo);
+	void Exec(BinaryReader& reader, std::string& writeTo) const;
 };
 
 namespace deserial {
@@ -25,9 +25,10 @@ namespace deserial {
 	void ds_blockbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap);
 	void ds_structbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap);
 	void ds_idList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string& writeTo));
-	void ds_staticList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string& writeTo));
+	void ds_staticList(BinaryReader& reader, std::string& writeTo, deserializer basetype);
 	
-
+	/* Manually Implemented Structs */
+	void ds_idStr(BinaryReader& reader, std::string& writeTo);
 
 	/* Primitive Types */
 	void ds_bool(BinaryReader& reader, std::string& writeTo);
