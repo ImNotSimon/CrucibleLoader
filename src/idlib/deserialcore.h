@@ -26,6 +26,7 @@ namespace deserial {
 	void ds_structbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap);
 	void ds_idList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string& writeTo));
 	void ds_staticList(BinaryReader& reader, std::string& writeTo, deserializer basetype);
+	void ds_idListMap(BinaryReader& reader, std::string& writeTo, void(*keyfunc)(BinaryReader& reader, std::string& writeTo), void(*valuefunc)(BinaryReader& reader, std::string& writeTo));
 	
 	/* Manually Implemented Structs */
 	void ds_idStr(BinaryReader& reader, std::string& writeTo);

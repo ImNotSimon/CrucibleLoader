@@ -21,7 +21,8 @@ const std::set<std::string> HandcodedStructs = {
     "unsigned_long",
     "unsigned_long_long",
     "float",
-    "double"
+    "double",
+    "idStr"
 };
 
 // Instead of generating unique reflection functions, key structs will use
@@ -52,7 +53,8 @@ class idlibReflector {
     // 
     const std::unordered_map<std::string, void(idlibReflector::*)(EntNode&)> SpecialTemplates = {
         {"idList", &idlibReflector::GenerateidList},
-        {"idListBase", &idlibReflector::GenerateidListBase}
+        {"idListBase", &idlibReflector::GenerateidListBase},
+        {"idListMap", &idlibReflector::GenerateidListMap }
     };
 
 
@@ -250,6 +252,53 @@ class idlibReflector {
     void GenerateidListBase(EntNode& typenode) {
         // idListBase should never actually be included, only idList
         assert(0);
+    }
+
+    void GenerateidListMap(EntNode& typenode) {
+        // We need to get the functions for the key and value types
+        EntNode& keyval = *typenode["values"].ChildAt(0);
+        EntNode& valueval = *typenode["values"].ChildAt(1);
+
+        descpp.append("\tds_idListMap(reader, writeTo, &ds_");
+
+        // Get key function
+        {
+            auto iter = typelib.find(std::string(keyval.getName()));
+            assert(iter != typelib.end());
+
+            // Get the idListBase
+            iter = typelib.find(std::string((*iter->second)["parentName"].getValue()));
+            assert(iter != typelib.end());
+
+            EntNode& keylist = *(*iter->second)["values"].ChildAt(0);
+            assert(keylist.getValue() == "list");
+            assert(&keylist["pointers"] != EntNode::SEARCH_404);
+            if (keylist["pointers"].getValue()[0] == '2')
+                WritePointerFunc(keylist.getName());
+            else descpp.append(keylist.getName());
+        }
+
+        
+
+        // Get value function
+        descpp.append(", &ds_");
+        {
+            auto iter = typelib.find(std::string(valueval.getName()));
+            assert(iter != typelib.end());
+
+            // Get the idListBase
+            iter = typelib.find(std::string((*iter->second)["parentName"].getValue()));
+            assert(iter != typelib.end());
+
+            EntNode& valuelist = *(*iter->second)["values"].ChildAt(0);
+            assert(valuelist.getValue() == "list");
+            assert(&valuelist["pointers"] != EntNode::SEARCH_404);
+            if (valuelist["pointers"].getValue()[0] == '2')
+                WritePointerFunc(valuelist.getName());
+            else descpp.append(valuelist.getName());
+        }
+
+        descpp.append(");\n");
     }
 
 

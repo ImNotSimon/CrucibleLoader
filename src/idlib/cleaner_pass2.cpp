@@ -140,6 +140,8 @@ void idlibCleaner2::RecurseTemplates() {
 		// Get the type stored by the list
 		EntNode& baselist = *iter->second.node;
 		EntNode& listtype = *baselist["values"].ChildAt(0);
+		assert(listtype.getValue() == "list");
+		assert(&listtype["array"] == EntNode::SEARCH_404);
 		
 		bool mustInclude;
 		{
@@ -152,6 +154,46 @@ void idlibCleaner2::RecurseTemplates() {
 			iter = typelib.find(std::string(listtype.getName()));
 			assert(iter != typelib.end());
 
+			if (!iter->second.forceInlude) {
+				iter->second.forceInlude = true;
+				includedThisRun = true;
+			}
+		}
+	}
+
+	/*
+	* idListMaps are another special case - neither the key nor value list has reflection tags
+	*/
+	EntNode& idListMaps = templates["idListMap"];
+	assert(&idListMaps != EntNode::SEARCH_404);
+
+	for (int i = 0, max = idListMaps.getChildCount(); i < max; i++) {
+		EntNode& map = *idListMaps.ChildAt(i);
+
+		// Skip list maps which are not included
+		auto iter = typelib.find(std::string(map.getName()));
+		assert(iter != typelib.end());
+		if (iter->second.referenceCount == 0 && !iter->second.forceInlude)
+			continue;
+
+		EntNode& valuenode = map["values"];
+		
+		// Include the key value
+		{
+			EntNode& keyvar = *valuenode.ChildAt(0);
+			iter = typelib.find(std::string(keyvar.getName()));
+			assert(iter != typelib.end());
+			if (!iter->second.forceInlude) {
+				iter->second.forceInlude = true;
+				includedThisRun = true;
+			}
+		}
+
+		// Include the value var
+		{
+			EntNode& valuevar = *valuenode.ChildAt(1);
+			iter = typelib.find(std::string(valuevar.getName()));
+			assert(iter != typelib.end());
 			if (!iter->second.forceInlude) {
 				iter->second.forceInlude = true;
 				includedThisRun = true;

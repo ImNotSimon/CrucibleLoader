@@ -306,6 +306,66 @@ void deserial::ds_staticList(BinaryReader& reader, std::string& writeTo, deseria
 	writeTo.append("}\n");
 }
 
+void deserial::ds_idListMap(BinaryReader& reader, std::string& writeTo, void(*keyfunc)(BinaryReader& reader, std::string& writeTo), void(*valuefunc)(BinaryReader& reader, std::string& writeTo))
+{
+	assert(*(reader.GetBuffer() - 5) == 0);
+	writeTo.append("{\n");
+
+	uint8_t bytecode;
+	uint16_t shortcode;
+	uint32_t length;
+
+	int currentElement = 0;
+	while (reader.GetRemaining() > 0) {
+
+
+		// TODO: Monitor to ensure this is always 3
+		assert(reader.ReadLE(shortcode));
+		assert(shortcode == 3);
+
+		/*
+		* Deserialize the pair's Key
+		*/
+		std::string propName = "key[";
+		propName.append(std::to_string(currentElement));
+		propName.push_back(']');
+		propertyStack.emplace_back(propName);
+
+		assert(reader.ReadLE(bytecode));
+		assert(bytecode == 0 || bytecode == 1);
+		assert(reader.ReadLE(length));
+
+		BinaryReader propReader(reader.GetNext(), length);
+		assert(reader.GoRight(length));
+		keyfunc(propReader, writeTo);
+		propertyStack.pop_back();
+
+		/*
+		* Deserialize the pair's Value
+		*/
+
+		writeTo.append(" = ");
+
+		propName = "value[";
+		propName.append(std::to_string(currentElement));
+		propName.push_back(']');
+		propertyStack.emplace_back(propName);
+
+
+		assert(reader.ReadLE(bytecode));
+		assert(bytecode == 0 || bytecode == 1);
+		assert(reader.ReadLE(length));
+
+		propReader = BinaryReader(reader.GetNext(), length);
+		assert(reader.GoRight(length));
+		valuefunc(propReader, writeTo);
+		propertyStack.pop_back();
+
+		currentElement++;
+	}
+	writeTo.append("}\n");
+}
+
 void deserial::ds_idStr(BinaryReader& reader, std::string& writeTo)
 {
 	assert(*(reader.GetBuffer() - 5) == 1);
