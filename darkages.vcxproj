@@ -153,6 +153,7 @@
     <ClCompile Include="src\idlib\generated\deserialgenerated.cpp" />
     <ClCompile Include="src\idlib\reflector.cpp" />
     <ClCompile Include="src\idlib\serialcore.cpp" />
+    <ClCompile Include="src\idlib\staticsparser.cpp" />
     <ClCompile Include="src\io\BinaryReader.cpp" />
     <ClCompile Include="src\io\BinaryWriter.cpp" />
     <ClCompile Include="src\Main.cpp" />
@@ -169,6 +170,7 @@
     <ClInclude Include="src\idlib\generated\deserialgenerated.h" />
     <ClInclude Include="src\idlib\reflector.h" />
     <ClInclude Include="src\idlib\serialcore.h" />
+    <ClInclude Include="src\idlib\staticsparser.h" />
     <ClInclude Include="src\io\BinaryReader.h" />
     <ClInclude Include="src\io\BinaryWriter.h" />
   </ItemGroup>

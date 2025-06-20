@@ -54,13 +54,16 @@
     <ClCompile Include="src\idlib\cleaner_pass2.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\idlib\generated\deserialgenerated.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\hash\HashLib.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\hash\FarmHash.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\idlib\staticsparser.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\idlib\generated\deserialgenerated.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -98,10 +101,13 @@
     <ClInclude Include="src\idlib\cleaner.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="src\idlib\generated\deserialgenerated.h">
+    <ClInclude Include="src\hash\HashLib.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="src\hash\HashLib.h">
+    <ClInclude Include="src\idlib\staticsparser.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\idlib\generated\deserialgenerated.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

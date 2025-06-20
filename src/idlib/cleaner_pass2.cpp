@@ -35,7 +35,7 @@ const std::set<std::string> ForcedInclusions = {
 // Instead of generating unique reflection functions, key structs' body functions
 // will only include a call to the value's reflection function
 const std::unordered_map<std::string, const char*> AliasStructs = {
-
+	{"idAtomicString", "idStr"}
 };
 
 

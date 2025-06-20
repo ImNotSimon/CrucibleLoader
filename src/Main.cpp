@@ -1,5 +1,4 @@
 #include <filesystem>
-#include <sstream>
 #include <iostream>
 #include <chrono>
 #include "idlib/reflector.h"
@@ -9,6 +8,8 @@
 #include "io/BinaryWriter.h"
 #include "io/BinaryReader.h"
 #include "hash/HashLib.h"
+#include "idlib/staticsparser.h"
+#include <cassert>
 
 #define TIMESTART(ID) auto EntityProfiling_ID  = std::chrono::high_resolution_clock::now();
 
@@ -20,7 +21,7 @@
 
 void deserialTest() {
 	const char* dir = "D:/Modding/dark ages/decls/entitydef/";
-	
+	std::string derp;
 	int i = 0;
 	for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
 		//std::cout << entry.path() << '\n';
@@ -32,33 +33,58 @@ void deserialTest() {
 
 		BinaryOpener opener = BinaryOpener(entry.path().string());
 		BinaryReader reader = opener.ToReader();
-		std::string derp;
+		//derp.append(entry.path().string());
+		//derp.push_back('\n');
 		deserial::ds_start_entitydef(reader, derp);
+		//derp.push_back('\n');
 	}
+	std::ofstream output;
+	output.open("input/editorvars.txt", std::ios_base::binary);
+	output << derp;
+	output.close();
 }
 
 void HashTests() {
-	uint64_t hashTest = HashLib::FarmHash64("test", 4);
-	uint64_t result = 0x7717383daa85b5b2L;
-	printf("%d\n", hashTest == result);
+	//uint64_t hashTest = HashLib::FarmHash64("test", 4);
+	//uint64_t result = 0x7717383daa85b5b2L;
+	//printf("%d\n", hashTest == result);
 
-	std::string type = "projectile";
-	std::string name = "projectile/ai/battleknight/axe_linear";
-	uint64_t v10 = HashLib::DeclHash(type, name);
+	//std::string type = "ability_Dash";
+	//std::string name = "default";
+	////uint64_t v10 = HashLib::DeclHash(type, name);
+
+	std::string val = "\"idPlayer\"";
+	uint64_t v10 = HashLib::FarmHash64(val.data(), val.length());
+	
+	//uint32_t* ptr = reinterpret_cast<uint32_t*>(&v10);
+	//uint32_t lo = ptr[0];
+	//uint32_t hi = ptr[1];
+
+	//uint32_t smol = lo ^ hi;
+
 
 	std::cout << std::hex << std::setfill('0') << std::setw(16) << v10 << std::endl;
 }
 
 void GenerateIdlib() {
-	//idlibCleaning::Pass1();
+	idlibCleaning::Pass1();
 	idlibCleaning::Pass2();
-	//idlibReflection::Generate();
+	idlibReflection::Generate();
+}
+
+void StaticsTest() {
+	BinaryOpener filedata("input/m2_hebeth.mapentities");
+	BinaryReader r = filedata.ToReader();
+
+	StaticsParser::Parse(r);
 }
 
 int main() {
+	GenerateIdlib();
+	//StaticsTest();
 	//deserialTest();
-	//GenerateIdlib();
-	HashTests();
+	
+	//HashTests();
 
 	//recurs s = {2, new recurs{34, new recurs}}
 	//TSerializeEnum<int, testMap>();

@@ -1,6 +1,7 @@
 #include "reflector.h"
 #include "entityslayer/EntityParser.h"
-#include "io/BinaryWriter.h"
+#include "hash/HashLib.h"
+#include <fstream>
 #include <set>
 #include <unordered_map>
 #include <cassert>
@@ -64,13 +65,14 @@ class idlibReflector {
             EntNode** valueArray = values.getChildBuffer();
             int valueCount = values.getChildCount();
 
-            int temp = 0; // TEMPORARY - until we get the hash codes
             for (EntNode** valIter = valueArray, **valMax = valueArray + valueCount; valIter < valMax; valIter++) {
                 EntNode& v = **valIter;
+                std::string_view vName = v.getName();
+                uint64_t hash = HashLib::FarmHash64(vName.data(), vName.length());
 
                 descpp.append("\t\t{");
-                descpp.append(std::to_string(temp++)); 
-                descpp.append(", \"");
+                descpp.append(std::to_string(hash)); 
+                descpp.append("UL, \"");
                 descpp.append(v.getName());
                 descpp.append("\"},\n");
             }
@@ -93,7 +95,7 @@ class idlibReflector {
         }
     }
 
-    void PopulateStructMap(EntNode& typeNode, int temp) {
+    void PopulateStructMap(EntNode& typeNode) {
         EntNode& values = typeNode["values"];
         EntNode** valueArray = values.getChildBuffer();
         int valueCount = values.getChildCount();
@@ -104,8 +106,10 @@ class idlibReflector {
             if (&v["INCLUDE"] == EntNode::SEARCH_404)
                 continue;
 
+            uint64_t hash = HashLib::FarmHash64(v.getValue().data(), v.getValue().length());
+
             descpp.append("\t\t{");
-            descpp.append(std::to_string(temp++));
+            descpp.append(std::to_string(hash));
             descpp.append(", {&ds_");
 
             /* If a pointer, map to the appropriate pointer function */
@@ -141,7 +145,7 @@ class idlibReflector {
             assert(iter != typelib.end());
             EntNode* parentType = iter->second;
 
-            PopulateStructMap(*parentType, temp);
+            PopulateStructMap(*parentType);
         }
     }
 
@@ -172,7 +176,7 @@ class idlibReflector {
 
                 if (&alias == EntNode::SEARCH_404) {
                     descpp.append("\tconst std::unordered_map<uint64_t, deserializer> propMap = {\n");
-                    PopulateStructMap(current, 0);
+                    PopulateStructMap(current);
                     descpp.append("\t};\n\tds_structbase(reader, writeTo, propMap);\n");
                 }
                 else {

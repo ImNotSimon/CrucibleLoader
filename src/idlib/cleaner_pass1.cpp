@@ -137,8 +137,8 @@ class idlibCleaner {
 
 	ParsedToken Tokenize();
 	void TokenAssert(TokenType type);
-	void BuildStruct();
-	void BuildEnum();
+	void BuildStruct(std::string_view hashHex);
+	void BuildEnum(std::string_view hashHex);
 	void Build();
 	void Write();
 };
@@ -372,7 +372,7 @@ void idlibCleaner::TokenAssert(TokenType type) {
 	}
 }
 
-void idlibCleaner::BuildStruct() {
+void idlibCleaner::BuildStruct(std::string_view hashHex) {
 	TokenAssert(TT_Keyword); // __cppobj
 
 	std::vector<ParsedToken> tokens;
@@ -480,6 +480,13 @@ void idlibCleaner::BuildStruct() {
         writeto->append(CleanName(parentName));
         writeto->push_back('\n');
     }
+
+    if (!hashHex.empty()) {
+        writeto->append("\t\thash = \"");
+        writeto->append(hashHex);
+        writeto->append("\"\n");
+    }
+
 
     writeto->append("\t\tvalues = {\n");
     
@@ -682,7 +689,7 @@ void idlibCleaner::BuildStruct() {
 
 }
 
-void idlibCleaner::BuildEnum() {
+void idlibCleaner::BuildEnum(std::string_view hashHex) {
 	ParsedToken name = Tokenize();
 	TokenAssert(TT_Colon);
 	TokenAssert(TT_Keyword);  // Parent Type - don't need this since enums are hashed
@@ -690,7 +697,9 @@ void idlibCleaner::BuildEnum() {
 
 	cleanenums.append("\t");
 	cleanenums.append(CleanName(name.data));
-	cleanenums.append(" = {\n\t\toriginalName = \"");
+    cleanenums.append(" \"");
+    cleanenums.append(hashHex);
+	cleanenums.append("\" {\n\t\toriginalName = \"");
 	cleanenums.append(name.data);
 	cleanenums.append("\"\n\t\tvalues = {\n");
 	ParsedToken var = Tokenize();
@@ -703,6 +712,7 @@ void idlibCleaner::BuildEnum() {
 		TokenAssert(TT_Equals);
 		TokenAssert(TT_Number);
 		TokenAssert(TT_Comma);
+        TokenAssert(TT_Comment);
 		var = Tokenize();
 	}
 	TokenAssert(TT_Semicolon);
@@ -710,24 +720,41 @@ void idlibCleaner::BuildEnum() {
 }
 
 void idlibCleaner::Build() {
-	ParsedToken keyword = Tokenize();
-	while (keyword.type == TT_Keyword || keyword.type == TT_Comment) {
-        if (keyword.type == TT_Comment) {
-            keyword = Tokenize();
-            continue;
+
+    ParsedToken comment = Tokenize();
+	//ParsedToken keyword = Tokenize();
+	while (comment.type == TT_Comment || comment.type == TT_Keyword) {
+        std::string_view hashHex = "";
+
+        // Some structs don't seem to have a hash
+        if (comment.type == TT_Comment) {
+            // Get the Hex Index
+            size_t hashString = comment.data.find("Hash: ");
+
+            // Enums might have a specifier flag comment before the hash comment
+            if (hashString == std::string_view::npos) {
+                comment = Tokenize();
+                continue;
+            }
+
+            size_t hexIndex = comment.data.find("0x", hashString);
+            assert(hexIndex != std::string_view::npos);
+            hashHex = comment.data.substr(hexIndex, 10);
+
+            comment = Tokenize();
         }
 
-		if (keyword.data == "enum") {
-			BuildEnum();
-			keyword = Tokenize();
+		if (comment.data == "enum") {
+			BuildEnum(hashHex);
 		}
-		else if (keyword.data == "struct") {
-			BuildStruct();
-			keyword = Tokenize();
+		else if (comment.data == "struct") {
+			BuildStruct(hashHex);
 		}
 		else { // idlib ends with a bunch of typedefs
 			break;
 		}
+
+        comment = Tokenize();
 	}
 	printf("Cleaning Pass 1 Finished.\n");
 }
