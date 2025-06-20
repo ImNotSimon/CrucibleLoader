@@ -58,8 +58,64 @@ void deserializer::Exec(BinaryReader& reader, std::string& writeTo) const {
 	propertyStack.pop_back();
 }
 
+void ds_entitydef2(BinaryReader& reader, std::string& writeTo)
+{
+	uint8_t bytecode;
+	uint32_t length;
+	uint64_t inherits;
+
+	assert(reader.ReadLE(bytecode));
+	assert(bytecode == 0);
+	assert(reader.ReadLE(length));
+	assert(length == reader.GetRemaining());
+	assert(reader.ReadLE(inherits));
+
+	// In map entities this byte is 0
+	assert(reader.ReadLE(bytecode));
+	assert(bytecode == 1);
+
+	// Block #1 - Padded Wrapper --> Serialization Hash --> Editor Vars
+	assert(reader.ReadLE(bytecode));
+	assert(bytecode == 1);
+	assert(reader.ReadLE(length));
+	assert(length == 0);
+	assert(reader.ReadLE(length));
+	assert(reader.GoRight(length));
+
+	// Block #2 - Padded Wrapper --> Entity Class (if no inheritance) + some booleans
+	assert(reader.ReadLE(bytecode));
+	assert(bytecode == 1);
+	assert(reader.ReadLE(length));
+	assert(length == 0);
+	assert(reader.ReadLE(length));
+	// Not true - there can be booleans set regardless of inheritance
+	//assert((inherits == 0 && (length == 32)) || (inherits != 0 && length == 0));
+	assert(reader.GoRight(length));
+
+
+	// Block #3 - Unpadded Wrapper --> Serialization Hash --> Edit Block
+	assert(reader.ReadLE(bytecode));
+	assert(bytecode == 0);
+	assert(reader.ReadLE(length));
+	assert(reader.GoRight(length));
+
+	// Block #4 - Unserialized Edit Block
+	assert(reader.ReadLE(bytecode));
+	assert(bytecode == 0);
+	assert(reader.ReadLE(length));
+	assert(reader.GoRight(length));
+
+
+	// Done
+	assert(reader.ReachedEOF());
+}
+
 void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo)
 {
+	//ds_entitydef2(reader, writeTo);
+	//return;
+
+	std::vector<int> blocks;
 	uint8_t bytecode;
 	uint32_t filelength;
 	uint64_t inherits;
@@ -76,8 +132,9 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo)
 
 	while (reader.GetRemaining() > 0) {
 		assert(reader.ReadLE(bytecode));
-
+		
 		if (bytecode == 0) {
+			blocks.push_back(0);
 			assert(reader.ReadLE(filelength));
 
 			if (filelength > 0) {
@@ -90,6 +147,7 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo)
 
 		}
 		else if (bytecode == 1) {
+			blocks.push_back(1);
 			assert(reader.ReadLE(filelength));
 			assert(filelength == 0);
 
@@ -97,7 +155,7 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo)
 
 			if (filelength > 0) {
 				assert(reader.ReadLE(bytecode));
-				assert(bytecode == 0 || bytecode == 1);
+				assert(bytecode == 0);
 				assert(reader.GoRight(filelength - 1));
 			}
 
@@ -107,7 +165,9 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo)
 			assert(0);
 		}
 	}
-	
+
+	assert(blocks.size() == 4);
+	assert(blocks[0] == 1 && blocks[1] == 1 && blocks[2] == 0 && blocks[3] == 0);
 }
 
 void deserial::ds_pointerbase(BinaryReader& reader, std::string& writeTo)

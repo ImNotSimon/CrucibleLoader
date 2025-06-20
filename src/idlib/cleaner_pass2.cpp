@@ -3,13 +3,51 @@
 #include <unordered_map>
 #include <string>
 #include <cassert>
+#include <set>
+
+/* Note: forced inclusions, exclusions, and aliases will likely be controlled in more places besides the following lists*/
+
+// Forcibly Exclude these types because we're manually implementing their functions.
+// Must use cleaned type name
+const std::set<std::string> ForcedExclusions = {
+	"bool",
+	"char",
+	"unsigned_char",
+	"wchar_t",
+	"short",
+	"unsigned_short",
+	"int",
+	"unsigned_int",
+	"long",
+	"long_long",
+	"unsigned_long",
+	"unsigned_long_long",
+	"float",
+	"double",
+	"idStr"
+};
+
+// For any structs that weren't included for whatever reason, but need to be
+const std::set<std::string> ForcedInclusions = {
+	"idEntityDefEditorVars"
+};
+
+// Instead of generating unique reflection functions, key structs' body functions
+// will only include a call to the value's reflection function
+const std::unordered_map<std::string, const char*> AliasStructs = {
+
+};
+
+
 
 struct TypeMap {
+	std::string_view alias = "";
 	EntNode* node = nullptr;
 	int referenceCount = 0;
 	bool IsEntity = false;
 	bool IsDecl = false;
 	bool forceInlude = false;
+	bool forceExclude = false; // Highest priority
 
 	TypeMap() {}
 	TypeMap(EntNode* n) : node(n) {}
@@ -32,6 +70,8 @@ class idlibCleaner2
 	void CountReferences(EntNode& typelist);
 	bool IsChildOf(const char* className, std::string_view type);
 	void RecurseTemplates();
+	void ApplyManualSettings();
+
 
 	void Build();
 	void Output();
@@ -206,6 +246,27 @@ void idlibCleaner2::RecurseTemplates() {
 
 }
 
+void idlibCleaner2::ApplyManualSettings()
+{
+	for (const std::string& s : ForcedExclusions) {
+		auto iter = typelib.find(s);
+		assert(iter != typelib.end());
+		iter->second.forceExclude = true;
+	}
+
+	for (const std::string& s : ForcedInclusions) {
+		auto iter = typelib.find(s);
+		assert(iter != typelib.end());
+		iter->second.forceInlude = true;
+	}
+
+	for (const auto& pair : AliasStructs) {
+		auto iter = typelib.find(pair.first);
+		assert(iter != typelib.end());
+		iter->second.alias = pair.second;
+	}
+}
+
 void idlibCleaner2::Build() {
 
 	EntNode& root = *parser.getRoot();
@@ -243,6 +304,10 @@ void idlibCleaner2::Build() {
 		CountReferences(*templates.ChildAt(i));
 	}
 
+	// This probably should be placed before RecurseTemplates
+	printf("Applying Manual Settings\n");
+	ApplyManualSettings();
+
 	//printf("Iterating over special types\n");
 	RecurseTemplates();
 
@@ -260,7 +325,13 @@ void idlibCleaner2::Build() {
 			parser.EditTree("pointerfunc = pointerdecl", pair.second.node, 0, 0, false, false);
 		}
 
-		if (pair.second.referenceCount > 0 || pair.second.IsEntity || pair.second.forceInlude) {
+		if (!pair.second.alias.empty()) {
+			std::string aliasText = "alias = ";
+			aliasText.append(pair.second.alias);
+			parser.EditTree(aliasText, pair.second.node, 0, 0, false, false);
+		}
+
+		if (!pair.second.forceExclude && (pair.second.referenceCount > 0 || pair.second.IsEntity || pair.second.forceInlude)) {
 			includeCount++;
 			parser.EditTree("INCLUDE", pair.second.node, 0, 0, false, false);
 		}

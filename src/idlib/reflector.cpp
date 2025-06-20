@@ -5,34 +5,6 @@
 #include <unordered_map>
 #include <cassert>
 
-// Don't generate reflection functions for these struct names
-// (Most likely reason is we're doing it manually for these types)
-const std::set<std::string> HandcodedStructs = {
-    "bool",
-    "char",
-    "unsigned_char",
-    "wchar_t",
-    "short",
-    "unsigned_short",
-    "int",
-    "unsigned_int",
-    "long",
-    "long_long",
-    "unsigned_long",
-    "unsigned_long_long",
-    "float",
-    "double",
-    "idStr"
-};
-
-// Instead of generating unique reflection functions, key structs will use
-// the value struct's reflection functions
-const std::unordered_map<std::string, const char*> AliasStructs = {
-
-};
-
-
-
 const char* desHeaderStart =
 R"(#include <string>
 class BinaryReader;
@@ -184,10 +156,6 @@ class idlibReflector {
         {
             EntNode& current = **structIter;
 
-            /* Exclude hard-coded structs from reflection generation */
-            if (HandcodedStructs.find(std::string(current.getName())) != HandcodedStructs.end()) {
-                continue;
-            }
             if(&current["INCLUDE"] == EntNode::SEARCH_404)
                 continue;
 
@@ -200,9 +168,19 @@ class idlibReflector {
             descpp.append("(BinaryReader& reader, std::string& writeTo) {\n");
 
             if (bodyFunction == nullptr) {
-                descpp.append("\tconst std::unordered_map<uint64_t, deserializer> propMap = {\n");
-                PopulateStructMap(current, 0);
-                descpp.append("\t};\n\tds_structbase(reader, writeTo, propMap);\n");
+                EntNode& alias = current["alias"];
+
+                if (&alias == EntNode::SEARCH_404) {
+                    descpp.append("\tconst std::unordered_map<uint64_t, deserializer> propMap = {\n");
+                    PopulateStructMap(current, 0);
+                    descpp.append("\t};\n\tds_structbase(reader, writeTo, propMap);\n");
+                }
+                else {
+                    descpp.append("\tds_");
+                    descpp.append(alias.getValue());
+                    descpp.append("(reader, writeTo);\n");
+                }
+
             }
             else {
                 (this->*bodyFunction)(current);
