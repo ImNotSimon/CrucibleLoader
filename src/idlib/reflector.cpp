@@ -27,7 +27,9 @@ class idlibReflector {
     const std::unordered_map<std::string, void(idlibReflector::*)(EntNode&)> SpecialTemplates = {
         {"idList", &idlibReflector::GenerateidList},
         {"idListBase", &idlibReflector::GenerateidListBase},
-        {"idListMap", &idlibReflector::GenerateidListMap }
+        {"idStaticList", &idlibReflector::GenerateidStaticList},
+        {"idListMap", &idlibReflector::GenerateidListMap },
+        {"idTypeInfoPtr", &idlibReflector::GenerateidTypeInfoPtr}
     };
 
 
@@ -37,8 +39,8 @@ class idlibReflector {
 
     idlibReflector() {
 
-        desheader.reserve(5000000);
-        descpp.reserve(5000000);
+        desheader.reserve(1000000);
+        descpp.reserve(8000000);
     }
 
     void GenerateEnums(EntNode& enums) {
@@ -236,6 +238,30 @@ class idlibReflector {
         assert(0);
     }
 
+    void GenerateidStaticList(EntNode& typenode) {
+        // The first value in idListBase is what the list stores
+        EntNode& listType = *typenode["values"].ChildAt(0);
+        assert(listType.getValue() == "staticList");
+
+        bool usePointerFunc;
+        {
+            // Since it's a static array, there may not be a pointer
+            std::string_view pointerCount = listType["pointers"].getValue();
+            assert(pointerCount.empty() || pointerCount[0] == '1');
+            usePointerFunc = !pointerCount.empty();
+        }
+
+        descpp.append("\tds_idList(reader, writeTo, &ds_");
+
+        if (usePointerFunc) {
+            WritePointerFunc(listType.getName());
+        }
+        else {
+            descpp.append(listType.getName());
+        }
+        descpp.append(");\n");
+    }
+
     void GenerateidListMap(EntNode& typenode) {
         // We need to get the functions for the key and value types
         EntNode& keyval = *typenode["values"].ChildAt(0);
@@ -283,12 +309,38 @@ class idlibReflector {
         descpp.append(");\n");
     }
 
+    void GenerateidTypeInfoPtr(EntNode& typenode) {
+        descpp.append("\tds_idTypeInfoPtr(reader, writeTo);\n");
+    }
+
 
     void AddTypeMap(EntNode& typelist) {
         for (int i = 0, max = typelist.getChildCount(); i < max; i++) {
             EntNode* n = typelist.ChildAt(i);
             typelib.emplace(n->getName(), n);
         }
+    }
+
+    void GenerateHashMaps() {
+        descpp.append("const std::unordered_map<uint32_t, deserialTypeInfo> deserial::typeInfoPtrMap = {\n");
+
+        for (const auto& pair : typelib) {
+            EntNode& node = *pair.second;
+            if(&node["INCLUDE"] == EntNode::SEARCH_404)
+                continue;
+
+            EntNode& hashNode = node["hash"];
+            assert(&hashNode != EntNode::SEARCH_404);
+            descpp.append("\t{");
+            descpp.append(hashNode.getValueUQ());
+            descpp.append("U, { &ds_");
+            descpp.append(pair.first);
+            descpp.append(", \"");
+            descpp.append(pair.first);
+            descpp.append("\"}},\n");
+        }
+
+        descpp.append("};\n");
     }
 
     void Generate(EntNode& root) {
@@ -311,6 +363,7 @@ class idlibReflector {
             AddTypeMap(*templates.ChildAt(i));
         }
 
+        GenerateHashMaps();
         GenerateEnums(enums);
         GenerateStruct(structs);
         GenerateStruct(templatesubs);
@@ -331,11 +384,11 @@ class idlibReflector {
     void OutputFiles() {
         desheader.push_back('}');
 
-        std::ofstream writer = std::ofstream("generated/deserialgenerated.h", std::ios_base::binary);
+        std::ofstream writer = std::ofstream("src/idlib/generated/deserialgenerated.h", std::ios_base::binary);
         writer.write(desheader.data(), desheader.length());
         writer.close();
 
-        writer.open("generated/deserialgenerated.cpp", std::ios_base::binary);
+        writer.open("src/idlib/generated/deserialgenerated.cpp", std::ios_base::binary);
         writer.write(descpp.data(), descpp.length());
         writer.close();
     }

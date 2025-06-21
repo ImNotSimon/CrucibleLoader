@@ -24,12 +24,14 @@ const std::set<std::string> ForcedExclusions = {
 	"unsigned_long_long",
 	"float",
 	"double",
-	"idStr"
+	"idStr",
+	"idLogicProperties"
 };
 
 // For any structs that weren't included for whatever reason, but need to be
 const std::set<std::string> ForcedInclusions = {
-	"idEntityDefEditorVars"
+	"idEntityDefEditorVars",
+	"idDeclEntityDef__gameSystemVariables_t"
 };
 
 // Instead of generating unique reflection functions, key structs' body functions
@@ -68,7 +70,7 @@ class idlibCleaner2
 
 	void AddTypeMap(EntNode& typelist);
 	void CountReferences(EntNode& typelist);
-	bool IsChildOf(const char* className, std::string_view type);
+	void CheckInheritance(std::string_view type);
 	void RecurseTemplates();
 	void ApplyManualSettings();
 
@@ -84,14 +86,28 @@ void idlibCleaner2::AddTypeMap(EntNode& typelist) {
 	}
 }
 
-bool idlibCleaner2::IsChildOf(const char* className, std::string_view type) {
-	auto pair = typelib[std::string(type)];
+void idlibCleaner2::CheckInheritance(std::string_view type) {
+	auto& pair = typelib[std::string(type)];
 	
 	EntNode* parent = &(*pair.node)["parentName"];
 	while (parent != EntNode::SEARCH_404) {
 		std::string_view parentString = parent->getValue();
-		if(parentString == className)
-			return true;
+		if (parentString == "idEngineEntity") {
+			pair.IsEntity = true;
+			return;
+		}
+		else if (parentString == "idDecl") {
+			pair.IsDecl = true;
+			return;
+		}
+		else if (parentString == "idStr") {
+			pair.alias = "idStr";
+			return;
+		}
+		else if (parentString == "idAtomicString") {
+			pair.alias = "idAtomicString";
+			return;
+		}
 			
 		
 		auto parentPair = typelib.find(std::string(parentString));
@@ -105,13 +121,12 @@ bool idlibCleaner2::IsChildOf(const char* className, std::string_view type) {
 			parser.EditText("UNDEFINED_PARENTtrue", parent, 16, false);
 			parser.PushGroupCommand();
 			//printf("UNKNOWN PARENT: %s\n", std::string(parentString).c_str());
-			return false;
+			return;
 		}
 		else {
 			parent = &(*parentPair->second.node)["parentName"];
 		}
 	}
-	return false;
 }
 
 void idlibCleaner2::CountReferences(EntNode& typelist)
@@ -188,6 +203,39 @@ void idlibCleaner2::RecurseTemplates() {
 			std::string_view pointerCount = listtype["pointers"].getValue();
 			assert(pointerCount.length() == 1);
 			mustInclude = pointerCount[0] == '1';
+		}
+
+		if (mustInclude) {
+			iter = typelib.find(std::string(listtype.getName()));
+			assert(iter != typelib.end());
+
+			if (!iter->second.forceInlude) {
+				iter->second.forceInlude = true;
+				includedThisRun = true;
+			}
+		}
+	}
+
+	EntNode& idStaticLists = templates["idStaticList"];
+	assert(&idStaticLists != EntNode::SEARCH_404);
+	for (int i = 0, max = idStaticLists.getChildCount(); i < max; i++) {
+		EntNode& list = *idStaticLists.ChildAt(i);
+
+		// Skip lists which are not included
+		auto iter = typelib.find(std::string(list.getName()));
+		assert(iter != typelib.end());
+		if (iter->second.referenceCount == 0 && !iter->second.forceInlude)
+			continue;
+
+		EntNode& listtype = *list["values"].ChildAt(0);
+		assert(listtype.getValue() == "staticList");
+
+		bool mustInclude;
+		{
+			// Since it's a static array, there may not be a pointer
+			std::string_view pointerCount = listtype["pointers"].getValue();
+			assert(pointerCount.empty() || pointerCount[0] == '1');
+			mustInclude = pointerCount.empty();
 		}
 
 		if (mustInclude) {
@@ -291,10 +339,9 @@ void idlibCleaner2::Build() {
 		AddTypeMap(*templates.ChildAt(i));
 	}
 
-	printf("Determining Entities\n");
+	printf("Inheritance Analysis\n");
 	for (auto& pair : typelib) {
-		pair.second.IsEntity = IsChildOf("idEngineEntity", pair.first);
-		pair.second.IsDecl = IsChildOf("idDecl", pair.first);
+		CheckInheritance(pair.first);
 	}
 
 	printf("Counting references \n"); // Do NOT count enums here

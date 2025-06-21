@@ -10,6 +10,9 @@
 
 // Used for stack tracing
 thread_local std::vector<std::string_view> propertyStack;
+thread_local deserialTypeInfo lastAccessedTypeInfo;
+thread_local int warningCount = 0;
+thread_local int fileCount = 0;
 
 void LogWarning(std::string_view msg) {
 	std::string propString;
@@ -22,15 +25,15 @@ void LogWarning(std::string_view msg) {
 	if(!propString.empty())
 		propString.pop_back();
 
-	printf("WARNING: %.*s %.*s", (int)propString.length(), propString.data(), (int)msg.length(), msg.data());
-		
+	printf("WARNING: %.*s %.*s\n", (int)propString.length(), propString.data(), (int)msg.length(), msg.data());
+	warningCount++;
 }
 
-//void DeserialFailure(std::string writeTo, const char* error) {
-//	assert(0);
-//}
-//
-//#define checkread(VAR, MSG) { if(!reader.ReadLE(VAR)) {DeserialFailure(writeTo, MSG);}  }
+void deserial::ds_debugging()
+{
+	printf("Total Warning Count: %d / Files: %d \n", warningCount, fileCount);
+}
+
 
 void deserializer::Exec(BinaryReader& reader, std::string& writeTo) const {
 	propertyStack.emplace_back(name);
@@ -61,6 +64,8 @@ void deserializer::Exec(BinaryReader& reader, std::string& writeTo) const {
 
 void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo)
 {
+	lastAccessedTypeInfo = {nullptr, nullptr};
+
 	#define HASH_EDIT 0xC2D0B77C0D10391CUL
 
 	uint8_t bytecode;
@@ -100,22 +105,54 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo)
 	}
 
 
-	// Block #2 - Padded Wrapper --> Entity Class (if no inheritance) + some booleans
-	assert(reader.ReadLE(bytecode));
-	assert(bytecode == 1);
-	assert(reader.ReadLE(length));
-	assert(length == 0);
-	assert(reader.ReadLE(length));
-	// Not true - there can be booleans set regardless of inheritance
-	//assert((inherits == 0 && (length == 32)) || (inherits != 0 && length == 0));
-	assert(reader.GoRight(length));
+	// Block #2 - Padded Wrapper --> gamesystemVariables_t (Entity class and some booleans)
+	{
+		assert(reader.ReadLE(bytecode));
+		assert(bytecode == 1);
+		assert(reader.ReadLE(length));
+		assert(length == 0);
+		assert(reader.ReadLE(length));
 
+		if (length != 0) {
+			// Edit Block
+			assert(reader.ReadLE(bytecode));
+			assert(bytecode == 0);
+			assert(reader.ReadLE(editHash));
+			assert(editHash == HASH_EDIT);
 
+			const deserializer systemVars = {&ds_idDeclEntityDef__gameSystemVariables_t, "systemVars", 0};
+			systemVars.Exec(reader, writeTo);
+		}
+	}
+
+	// TODO: If the class is not explicitly defined, look it up via an entityDef mapping
+	if(lastAccessedTypeInfo.callback == nullptr)
+		return;
+
+	fileCount++;
 	// Block #3 - Unpadded Wrapper --> Serialization Hash --> Edit Block
-	assert(reader.ReadLE(bytecode));
-	assert(bytecode == 0);
-	assert(reader.ReadLE(length));
-	assert(reader.GoRight(length));
+	{
+		assert(reader.ReadLE(bytecode));
+		assert(bytecode == 0);
+		assert(reader.ReadLE(length));
+		assert(reader.ReadLE(bytecode));
+		assert(bytecode == 1);
+		assert(reader.ReadLE(length));
+		assert(length == 0);
+		assert(reader.ReadLE(length));
+
+		if (length != 0) {
+			// Edit Block
+			assert(reader.ReadLE(bytecode));
+			assert(bytecode == 0);
+			assert(reader.ReadLE(editHash));
+			assert(editHash == HASH_EDIT);
+
+			const deserializer editBlock = {lastAccessedTypeInfo.callback, "edit", 0};
+			editBlock.Exec(reader, writeTo);
+		}
+	}
+
 
 	// Block #4 - Unserialized Edit Block
 	assert(reader.ReadLE(bytecode));
@@ -158,6 +195,28 @@ void deserial::ds_pointerdecl(BinaryReader& reader, std::string& writeTo)
 	writeTo.append("\";\n");
 }
 
+void deserial::ds_idTypeInfoPtr(BinaryReader& reader, std::string& writeTo)
+{
+	assert(*(reader.GetBuffer() - 5) == 1); // Leaf node
+	assert(reader.GetLength() == 4);
+
+	uint32_t hash;
+	reader.ReadLE(hash);
+
+	const auto& iter = typeInfoPtrMap.find(hash);
+	assert(iter != typeInfoPtrMap.end());
+
+	writeTo.push_back('"');
+	writeTo.append(iter->second.name);
+	writeTo.append("\";\n");
+
+	lastAccessedTypeInfo = iter->second;
+}
+
+void deserial::ds_idTypeInfoObjectPtr(BinaryReader& reader, std::string& writeTo)
+{
+}
+
 void deserial::ds_enumbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, const char*>& enumMap)
 {
 	assert(*(reader.GetBuffer() - 5) == 1); // Leaf node
@@ -197,7 +256,12 @@ void deserial::ds_blockbase(BinaryReader& reader, std::string& writeTo, const st
 
 void deserial::ds_structbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap)
 {
-	assert(*(reader.GetBuffer() - 5) == 0); // Stem node
+	// Stem node
+	if (*(reader.GetBuffer() - 5) != 0) {
+		LogWarning("Structure is not a stem node!");
+		writeTo.append("\"BAD STRUCT\";\n");
+		return;
+	}
 
 	writeTo.append("{\n");
 	while (reader.GetRemaining() > 0) {
@@ -218,6 +282,13 @@ void deserial::ds_structbase(BinaryReader& reader, std::string& writeTo, const s
 			std::string msg = "Unknown Property Hash ";
 			msg.append(hashString, 8);
 			LogWarning(msg);
+
+			// Skip the property
+			assert(reader.ReadLE(bytecode));
+			assert(bytecode == 0 || bytecode == 1); 
+			uint32_t len;
+			assert(reader.ReadLE(len));
+			assert(reader.GoRight(len));
 		}
 	}
 	writeTo.append("}\n");
@@ -225,6 +296,8 @@ void deserial::ds_structbase(BinaryReader& reader, std::string& writeTo, const s
 
 void deserial::ds_idList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string& writeTo))
 {
+	writeTo.append("{\n");
+
 	assert(*(reader.GetBuffer() - 5) == 0);
 	
 	#define HASH_NUM 0x1437944E8D38F7D9UL
@@ -234,18 +307,24 @@ void deserial::ds_idList(BinaryReader& reader, std::string& writeTo, void(*callb
 	uint32_t length;
 	uint64_t numHash;
 
-	// Read The element count
-	assert(reader.ReadLE(bytecode));
-	assert(bytecode == 0);
-	assert(reader.ReadLE(numHash));
-	assert(numHash == HASH_NUM);
-	assert(reader.ReadLE(length));
-	assert(length == 2);
-	assert(reader.ReadLE(shortlength));
+	// Read the list length
+	// Length isn't guaranteed to be serialized i.e. when partially modifying an inherited list
+	if (*reader.GetNext() == '\0') {
+		assert(reader.ReadLE(bytecode));
+		assert(bytecode == 0);
+		assert(reader.ReadLE(numHash));
+		assert(numHash == HASH_NUM);
+		assert(reader.ReadLE(bytecode));
+		assert(bytecode == 1);
+		assert(reader.ReadLE(length));
+		assert(length == 2);
+		assert(reader.ReadLE(shortlength));
 
-	writeTo.append("{\nnum = ");
-	writeTo.append(std::to_string(shortlength));
-	writeTo.append(";\n");
+		writeTo.append("num = ");
+		writeTo.append(std::to_string(shortlength));
+		writeTo.append(";\n");
+	}
+
 
 	// FORMAT of elements:
 	// 4 Bytes:
@@ -358,6 +437,10 @@ void deserial::ds_idListMap(BinaryReader& reader, std::string& writeTo, void(*ke
 		keyfunc(propReader, writeTo);
 		propertyStack.pop_back();
 
+		// Workaround to remove semicolon and newline normally placed after value is deserialized
+		writeTo.pop_back();
+		writeTo.pop_back();
+
 		/*
 		* Deserialize the pair's Value
 		*/
@@ -406,6 +489,36 @@ void deserial::ds_idStr(BinaryReader& reader, std::string& writeTo)
 
 	assert(reader.GetRemaining() == 0);
 
+}
+
+void deserial::ds_idLogicProperties(BinaryReader& reader, std::string& writeTo)
+{
+	assert(*(reader.GetBuffer() - 5) == 0); // Stem node
+	writeTo.append("{\n");
+
+	uint8_t bytecode;
+	uint64_t hash;
+
+	/*
+	* The format is basically: 
+	* - Property hashes are 4 byte logicProperty_t ID values, with upper word = 0
+	* - Properties are logicProperty_t structs
+	* - No length variables given
+	*/
+	while (reader.GetRemaining() > 0) {
+		assert(reader.ReadLE(bytecode));
+		assert(bytecode == 0);
+		reader.ReadLE(hash);
+
+		std::string hashString = "\"";
+		hashString.append(std::to_string(hash));
+		hashString.push_back('"');
+
+		deserializer ds = {&ds_logicProperty_t, hashString.c_str()};
+		ds.Exec(reader, writeTo);
+	}
+
+	writeTo.append("}\n");
 }
 
 void deserial::ds_bool(BinaryReader& reader, std::string& writeTo)

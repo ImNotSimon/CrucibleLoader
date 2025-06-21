@@ -19,7 +19,27 @@
 	printf("%s: %zu", msg, duration.count());\
 }
 
+// TODO:
+// Manually implement idLogicProperties - it's a fake list with no count - property hash is the logicProperty_t identifier var (which is then repeated in the struct)
+// 
+// idTypeInfoObjectPtr - A virtual class system:
+// Two properties: className - a class hash
+// Value
+
 void deserialTest() {
+	
+	if (0) {
+		const char* entity = "D:/Modding/dark ages/decls/entitydef/ai/boss/cthulhu_mecha/flying_slam_ground_tentacles.entityDef";
+
+		BinaryOpener opener = BinaryOpener(entity);
+		BinaryReader reader = opener.ToReader();
+
+		std::string no;
+		deserial::ds_start_entitydef(reader, no);
+		return;
+	}
+
+
 	const char* dir = "D:/Modding/dark ages/decls/entitydef/";
 	std::string derp;
 	int i = 0;
@@ -33,15 +53,17 @@ void deserialTest() {
 
 		BinaryOpener opener = BinaryOpener(entry.path().string());
 		BinaryReader reader = opener.ToReader();
-		//derp.append(entry.path().string());
-		//derp.push_back('\n');
+		derp.push_back('"');
+		derp.append(entry.path().string());
+		derp.append("\" = {");
 		deserial::ds_start_entitydef(reader, derp);
-		//derp.push_back('\n');
+		derp.append("}\n");
 	}
 	std::ofstream output;
 	output.open("input/editorvars.txt", std::ios_base::binary);
 	output << derp;
 	output.close();
+	deserial::ds_debugging();
 }
 
 void HashTests() {
@@ -53,7 +75,7 @@ void HashTests() {
 	//std::string name = "default";
 	////uint64_t v10 = HashLib::DeclHash(type, name);
 
-	std::string val = "\"idPlayer\"";
+	std::string val = "logicEntityList";
 	uint64_t v10 = HashLib::FarmHash64(val.data(), val.length());
 	
 	//uint32_t* ptr = reinterpret_cast<uint32_t*>(&v10);
@@ -67,7 +89,7 @@ void HashTests() {
 }
 
 void GenerateIdlib() {
-	idlibCleaning::Pass1();
+	//idlibCleaning::Pass1();
 	idlibCleaning::Pass2();
 	idlibReflection::Generate();
 }
@@ -80,25 +102,13 @@ void StaticsTest() {
 }
 
 int main() {
-	GenerateIdlib();
+	//GenerateIdlib();
+	deserialTest();
+
+
 	//StaticsTest();
-	//deserialTest();
-	
 	//HashTests();
-
-	//recurs s = {2, new recurs{34, new recurs}}
-	//TSerializeEnum<int, testMap>();
-
-
-
-	//const char* derp = "asdf";
-	//BinaryReader reader = BinaryReader((char*)derp, 1);
-	//std::string chungus;
-
-	//deserializer t;
-	//t.callback = &testfunc;
-	//t.callback(reader, chungus);
-
+	
 
 
 	// OLD

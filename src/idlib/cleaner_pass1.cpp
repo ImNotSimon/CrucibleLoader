@@ -697,10 +697,10 @@ void idlibCleaner::BuildEnum(std::string_view hashHex) {
 
 	cleanenums.append("\t");
 	cleanenums.append(CleanName(name.data));
-    cleanenums.append(" \"");
-    cleanenums.append(hashHex);
-	cleanenums.append("\" {\n\t\toriginalName = \"");
+	cleanenums.append(" {\n\t\toriginalName = \"");
 	cleanenums.append(name.data);
+    cleanenums.append("\"\n\t\thash = \"");
+    cleanenums.append(hashHex);
 	cleanenums.append("\"\n\t\tvalues = {\n");
 	ParsedToken var = Tokenize();
 
