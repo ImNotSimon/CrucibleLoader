@@ -34,6 +34,10 @@ void deserial::ds_debugging()
 	printf("Total Warning Count: %d / Files: %d \n", warningCount, fileCount);
 }
 
+int deserial::ds_debugWarningCount() {
+	return warningCount;
+}
+
 
 void deserializer::Exec(BinaryReader& reader, std::string& writeTo) const {
 	propertyStack.emplace_back(name);
@@ -155,10 +159,19 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo)
 
 
 	// Block #4 - Unserialized Edit Block
-	assert(reader.ReadLE(bytecode));
-	assert(bytecode == 0);
-	assert(reader.ReadLE(length));
-	assert(reader.GoRight(length));
+	{
+		assert(reader.ReadLE(bytecode));
+		assert(bytecode == 0);
+		assert(reader.ReadLE(length));
+
+		const char* unserialized = nullptr;
+		assert(reader.ReadBytes(unserialized, length));
+
+		writeTo.append("original = {");
+		writeTo.append(unserialized, length);
+		writeTo.append("}\n");
+	}
+
 
 
 	// Done
@@ -202,19 +215,60 @@ void deserial::ds_idTypeInfoPtr(BinaryReader& reader, std::string& writeTo)
 
 	uint32_t hash;
 	reader.ReadLE(hash);
+	if (hash == 0) {
+		
+		lastAccessedTypeInfo = {nullptr, nullptr};
+		writeTo.append("\"\";\n");
+	}
+	else {
+		const auto& iter = typeInfoPtrMap.find(hash);
+		assert(iter != typeInfoPtrMap.end());
 
-	const auto& iter = typeInfoPtrMap.find(hash);
-	assert(iter != typeInfoPtrMap.end());
+		writeTo.push_back('"');
+		writeTo.append(iter->second.name);
+		writeTo.append("\";\n");
 
-	writeTo.push_back('"');
-	writeTo.append(iter->second.name);
-	writeTo.append("\";\n");
-
-	lastAccessedTypeInfo = iter->second;
+		lastAccessedTypeInfo = iter->second;
+	}
 }
 
 void deserial::ds_idTypeInfoObjectPtr(BinaryReader& reader, std::string& writeTo)
 {
+	writeTo.append("{\n");
+
+	assert(*(reader.GetBuffer() - 5) == 0);
+	
+	#define HASH_className 0x18986161CE41CA86UL
+	#define HASH_object 0x0D83405E5171CB03UL
+
+	uint8_t bytecode;
+	uint64_t hash;
+
+	assert(reader.ReadLE(bytecode));
+	assert(bytecode == 0);
+	assert(reader.ReadLE(hash));
+
+	if (hash != HASH_className) {
+		LogWarning("TypeInfoObjectPtr has inherited class name and cannot be parsed");
+		writeTo.append("}\n");
+		return;
+	}
+
+	const deserializer dsClass = {&ds_idTypeInfoPtr, "className"};
+	dsClass.Exec(reader, writeTo);
+
+	if (reader.GetRemaining() > 0) {
+
+		assert(reader.ReadLE(bytecode));
+		assert(bytecode == 0);
+		assert(reader.ReadLE(hash));
+		assert(hash == HASH_object);
+
+		const deserializer dsObject = { lastAccessedTypeInfo.callback, "object" };
+		dsObject.Exec(reader, writeTo);
+	}
+
+	writeTo.append("}\n");
 }
 
 void deserial::ds_enumbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, const char*>& enumMap)
@@ -260,6 +314,7 @@ void deserial::ds_structbase(BinaryReader& reader, std::string& writeTo, const s
 	if (*(reader.GetBuffer() - 5) != 0) {
 		LogWarning("Structure is not a stem node!");
 		writeTo.append("\"BAD STRUCT\";\n");
+		//assert(0);
 		return;
 	}
 
@@ -280,7 +335,8 @@ void deserial::ds_structbase(BinaryReader& reader, std::string& writeTo, const s
 			char hashString[9];
 			snprintf(hashString, 9, "%I64X", hash);
 			std::string msg = "Unknown Property Hash ";
-			msg.append(hashString, 8);
+			//msg.append(hashString, 8);
+			msg.append(std::to_string(hash));
 			LogWarning(msg);
 
 			// Skip the property

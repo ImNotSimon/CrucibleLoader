@@ -44,12 +44,14 @@ void deserialTest() {
 	std::string derp;
 	int i = 0;
 	for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
-		//std::cout << entry.path() << '\n';
-		if(++i % 100 == 0)
-			printf("%d\n", i);
-
+		//if(++i % 100 == 0)
+		//	printf("%d\n", i);
 		if(entry.is_directory())
 			continue;
+
+
+		std::string pathString = entry.path().string();
+		int previousWarningCount = deserial::ds_debugWarningCount();
 
 		BinaryOpener opener = BinaryOpener(entry.path().string());
 		BinaryReader reader = opener.ToReader();
@@ -58,6 +60,9 @@ void deserialTest() {
 		derp.append("\" = {");
 		deserial::ds_start_entitydef(reader, derp);
 		derp.append("}\n");
+
+		if(previousWarningCount != deserial::ds_debugWarningCount())
+			printf("%s\n", pathString.c_str());
 	}
 	std::ofstream output;
 	output.open("input/editorvars.txt", std::ios_base::binary);
@@ -102,8 +107,12 @@ void StaticsTest() {
 }
 
 int main() {
+
+	uint32_t f = 0x3E4EF420;
+	printf("%s", std::to_string(*reinterpret_cast<float*>(&f)).c_str());
+
 	//GenerateIdlib();
-	deserialTest();
+	//deserialTest();
 
 
 	//StaticsTest();

@@ -34,32 +34,34 @@ std::string CleanName(const std::string_view from) {
 bool FindFlag(std::string_view flags, std::string_view target) {
     size_t pos = flags.find(target);
 
-    if(pos == std::string_view::npos)
-        return false;
+    while (pos != std::string_view::npos) {
+        // Verify the left side is delimited
+        if (pos != 0) {
+            switch (flags[pos - 1]) {
+                case ' ': case '\t': case '|':
+                break;
 
-    // Verify the left side is delimited
-    if (pos != 0) {
-        switch (flags[pos - 1]) {
-            case ' ': case '\t': case '|':
-            break;
-
-            default:
-            return false;
+                default:
+                pos = flags.find(target, pos + 1);
+                continue;
+            }
         }
-    }
 
-    // Verify the right side is delimited
-    if (pos + target.length() != flags.length()) {
-        switch (flags[pos + target.length()]) {
-            case ' ': case '\t': case '|':
-            break;
+        // Verify the right side is delimited
+        if (pos + target.length() != flags.length()) {
+            switch (flags[pos + target.length()]) {
+                case ' ': case '\t': case '|':
+                break;
 
-            default:
-            return false;
+                default:
+                pos = flags.find(target, pos + 1);
+                continue;
+            }
         }
-    }
 
-    return true;
+        return true;
+    }
+    return false;
 }
 
 bool TokenizeFlags(std::string_view comment) {

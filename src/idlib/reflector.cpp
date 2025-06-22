@@ -29,7 +29,11 @@ class idlibReflector {
         {"idListBase", &idlibReflector::GenerateidListBase},
         {"idStaticList", &idlibReflector::GenerateidStaticList},
         {"idListMap", &idlibReflector::GenerateidListMap },
-        {"idTypeInfoPtr", &idlibReflector::GenerateidTypeInfoPtr}
+        {"idTypeInfoPtr", &idlibReflector::GenerateidTypeInfoPtr},
+        {"idTypeInfoObjectPtr", &idlibReflector::GenerateidTypeInfoObjectPtr},
+        {"idTypesafeNumber", &idlibReflector::GenerateidTypesafeNumber},
+        {"idManagedClassPtr", &idlibReflector::GenerateidManagedClassPtr},
+        {"idLogicEntityPtr", &idlibReflector::GenerateidLogicEntityPtr}
     };
 
 
@@ -311,6 +315,30 @@ class idlibReflector {
 
     void GenerateidTypeInfoPtr(EntNode& typenode) {
         descpp.append("\tds_idTypeInfoPtr(reader, writeTo);\n");
+    }
+
+    void GenerateidTypeInfoObjectPtr(EntNode& typenode) {
+        descpp.append("\tds_idTypeInfoObjectPtr(reader, writeTo);\n");
+    }
+
+    void GenerateidTypesafeNumber(EntNode& typenode) {
+        EntNode& numType = *typenode["values"].ChildAt(0);
+        assert(numType.getValue() == "value");
+
+        descpp.append("\tds_");
+        descpp.append(numType.getName());
+        descpp.append("(reader, writeTo);\n");
+    }
+
+    void GenerateidManagedClassPtr(EntNode& typenode) {
+        // TODO: Monitor - Not actually sure if these are typeinfo
+        // since these are all 0 in the entitydef
+
+        descpp.append("\tds_idTypeInfoPtr(reader, writeTo);\n");
+    }
+
+    void GenerateidLogicEntityPtr(EntNode& typenode) {
+        descpp.append("\tds_idStr(reader, writeTo);\n");
     }
 
 

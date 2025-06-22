@@ -26,6 +26,7 @@ namespace deserial {
 
 	/* Debugging */
 	void ds_debugging();
+	int ds_debugWarningCount();
 
 	/* Entry Points */
 	void ds_start_entitydef(BinaryReader& reader, std::string& writeTo);

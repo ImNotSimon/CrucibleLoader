@@ -37,7 +37,18 @@ const std::set<std::string> ForcedInclusions = {
 // Instead of generating unique reflection functions, key structs' body functions
 // will only include a call to the value's reflection function
 const std::unordered_map<std::string, const char*> AliasStructs = {
-	{"idAtomicString", "idStr"}
+	{"idAtomicString", "idStr"},
+	{"aliasHandle_t", "idStr"}, // This idHandle child is serialized as a string, but not all are guaranteed to be like this (encounter event handles seem to be a typeinfo hash)
+	
+	{"secondsToGameTime_t", "idTypesafeTime_T_long_long___gameTimeUnique_t___999960_T"},
+	{"milliToGameTime_t", "idTypesafeTime_T_long_long___gameTimeUnique_t___999960_T"},
+
+	// For some reason, these are all serialized in 4 bytes, even if the underlying value is 8 bytes
+	{"idTypesafeTime_T_long_long___gameTimeUnique_t___999960_T", "int"},
+	{"idTypesafeTime_T_long_long___microsecondUnique_t___1000000_T", "int"},
+	{"idTypesafeTime_T_int___millisecondUnique_t___1000_T", "int"},
+	{"idTypesafeTime_T_float___secondUnique_t___1_T", "float"},
+
 };
 
 
@@ -71,6 +82,7 @@ class idlibCleaner2
 	void AddTypeMap(EntNode& typelist);
 	void CountReferences(EntNode& typelist);
 	void CheckInheritance(std::string_view type);
+	int IncludeDescendantsOf(std::string_view parentName);
 	void RecurseTemplates();
 	void ApplyManualSettings();
 
@@ -127,6 +139,45 @@ void idlibCleaner2::CheckInheritance(std::string_view type) {
 			parent = &(*parentPair->second.node)["parentName"];
 		}
 	}
+}
+
+// Used in template recursion
+int idlibCleaner2::IncludeDescendantsOf(std::string_view targetParent) {
+	int newInclusions = 0;
+
+	for (auto& iter : typelib) {
+		
+		if (targetParent == iter.first) {
+			if (iter.second.referenceCount == 0 && !iter.second.forceInlude) {
+				iter.second.forceInlude = true;
+				newInclusions++;
+			}
+			continue;
+		}
+
+		EntNode* parent = &(*iter.second.node)["parentName"];
+		while (parent != EntNode::SEARCH_404) {
+			std::string_view parentString = parent->getValue();
+			if (parentString == targetParent) {
+				if (iter.second.referenceCount == 0 && !iter.second.forceInlude) {
+					iter.second.forceInlude = true;
+					newInclusions++;
+				}
+				//printf("%.*s\n", (int)iter.first.length(), iter.first.data());
+				break;
+			}
+		
+			auto parentPair = typelib.find(std::string(parentString));
+			/*
+			* A very small number of structs have a parent type that's
+			* not defined in the idlib - we fix these here
+			*/
+			assert(parentPair != typelib.end());
+			parent = &(*parentPair->second.node)["parentName"];
+		}
+	}
+
+	return newInclusions;
 }
 
 void idlibCleaner2::CountReferences(EntNode& typelist)
@@ -288,6 +339,33 @@ void idlibCleaner2::RecurseTemplates() {
 			}
 		}
 	}
+
+	// This will more than double the amount of included types - and increases runtime of this phase
+	// To try and avoid doing this for as long as possible, I'll attempt to only include types which are actually encountered
+	// Also, this probably only needs to run once - should monitor and see
+	int childrenIncludes = IncludeDescendantsOf("idLogicVariableModel");
+	childrenIncludes += IncludeDescendantsOf("idTriggerBodyData");
+
+	//printf("In looping hell\n");
+	//EntNode& idTypeInfoObjectPtrs = templates["idTypeInfoObjectPtr"];
+	//assert(&idTypeInfoObjectPtrs != EntNode::SEARCH_404);
+	//for (int i = 0, max = idTypeInfoObjectPtrs.getChildCount(); i < max; i++) {
+	//	EntNode& objptr = *idTypeInfoObjectPtrs.ChildAt(i);
+
+	//	EntNode& ptrtype = *objptr["values"].ChildAt(0);
+	//	assert(ptrtype.getValue() == "object");
+
+	//	std::string_view typeString = ptrtype.getName();
+	//	//printf("%.*s ", (int)typeString.length(), typeString.data());
+	//	if (typeString == "idClass") {
+	//		printf("skipping idTypeInfoObjectPtr for idClass\n");
+	//		continue;
+	//	}
+
+	//	int newIncludes = IncludeDescendantsOf(typeString);
+	//	if(newIncludes > 0)
+	//		includedThisRun = true;
+	//}
 
 	if(includedThisRun)
 		RecurseTemplates();
