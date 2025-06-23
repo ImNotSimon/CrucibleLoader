@@ -1,15 +1,12 @@
-#include <filesystem>
 #include <iostream>
+#include <iomanip>
+#include <filesystem>
+#include <fstream>
 #include <chrono>
-#include "idlib/reflector.h"
-#include "idlib/cleaner.h"
-#include "idlib/deserialcore.h"
-#include <unordered_map>
-#include "io/BinaryWriter.h"
+#include "staticsparser.h"
 #include "io/BinaryReader.h"
+#include "deserialcore.h"
 #include "hash/HashLib.h"
-#include "idlib/staticsparser.h"
-#include <cassert>
 
 #define TIMESTART(ID) auto EntityProfiling_ID  = std::chrono::high_resolution_clock::now();
 
@@ -18,13 +15,6 @@
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(timeStop - EntityProfiling_ID); \
 	printf("%s: %zu", msg, duration.count());\
 }
-
-// TODO:
-// Manually implement idLogicProperties - it's a fake list with no count - property hash is the logicProperty_t identifier var (which is then repeated in the struct)
-// 
-// idTypeInfoObjectPtr - A virtual class system:
-// Two properties: className - a class hash
-// Value
 
 void deserialTest() {
 	
@@ -44,8 +34,8 @@ void deserialTest() {
 	std::string derp;
 	int i = 0;
 	for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
-		//if(++i % 100 == 0)
-		//	printf("%d\n", i);
+		if(++i % 100 == 0)
+			printf("%d\n", i);
 		if(entry.is_directory())
 			continue;
 
@@ -65,7 +55,7 @@ void deserialTest() {
 			printf("%s\n", pathString.c_str());
 	}
 	std::ofstream output;
-	output.open("input/editorvars.txt", std::ios_base::binary);
+	output.open("../input/editorvars.txt", std::ios_base::binary);
 	output << derp;
 	output.close();
 	deserial::ds_debugging();
@@ -82,7 +72,7 @@ void HashTests() {
 
 	std::string val = "logicEntityList";
 	uint64_t v10 = HashLib::FarmHash64(val.data(), val.length());
-	
+
 	//uint32_t* ptr = reinterpret_cast<uint32_t*>(&v10);
 	//uint32_t lo = ptr[0];
 	//uint32_t hi = ptr[1];
@@ -93,12 +83,6 @@ void HashTests() {
 	std::cout << std::hex << std::setfill('0') << std::setw(16) << v10 << std::endl;
 }
 
-void GenerateIdlib() {
-	//idlibCleaning::Pass1();
-	idlibCleaning::Pass2();
-	idlibReflection::Generate();
-}
-
 void StaticsTest() {
 	BinaryOpener filedata("input/m2_hebeth.mapentities");
 	BinaryReader r = filedata.ToReader();
@@ -107,25 +91,6 @@ void StaticsTest() {
 }
 
 int main() {
-
-	uint32_t f = 0x3E4EF420;
-	printf("%s", std::to_string(*reinterpret_cast<float*>(&f)).c_str());
-
-	//GenerateIdlib();
-	//deserialTest();
-
-
-	//StaticsTest();
-	//HashTests();
-	
-
-
-	// OLD
-
-	//float f = 234.34236435234;
-	//std::ostringstream test;
-
-	//test << f;
-	//std::cout << test.str() << '\n';
-	//std::cout << f << '\n' << std::to_string(f);
+	deserialTest();
+	return 1;
 }

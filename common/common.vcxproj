@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -18,35 +18,56 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\entityslayer\EntityLogger.cpp" />
+    <ClCompile Include="src\entityslayer\EntityNode.cpp" />
+    <ClCompile Include="src\entityslayer\EntityParser.cpp" />
+    <ClCompile Include="src\entityslayer\GenericBlockAllocator.cpp" />
+    <ClCompile Include="src\entityslayer\Oodle.cpp" />
+    <ClCompile Include="src\hash\FarmHash.cpp" />
+    <ClCompile Include="src\hash\HashLib.cpp" />
+    <ClCompile Include="src\io\BinaryReader.cpp" />
+    <ClCompile Include="src\io\BinaryWriter.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\entityslayer\EntityLogger.h" />
+    <ClInclude Include="src\entityslayer\EntityNode.h" />
+    <ClInclude Include="src\entityslayer\EntityParser.h" />
+    <ClInclude Include="src\entityslayer\GenericBlockAllocator.h" />
+    <ClInclude Include="src\entityslayer\Oodle.h" />
+    <ClInclude Include="src\hash\HashLib.h" />
+    <ClInclude Include="src\io\BinaryReader.h" />
+    <ClInclude Include="src\io\BinaryWriter.h" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{25397b32-3116-4ed6-b158-37097dad5299}</ProjectGuid>
-    <RootNamespace>darkages</RootNamespace>
+    <ProjectGuid>{31bd7844-9c32-4f72-98cb-6e61d74a2828}</ProjectGuid>
+    <RootNamespace>common</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
@@ -70,6 +91,14 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <OutDir>bin\build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>bin\intermediate\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <OutDir>bin\build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>bin\intermediate\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>bin\build\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>bin\intermediate\$(Platform)\$(Configuration)\</IntDir>
@@ -84,6 +113,8 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>src/</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -98,6 +129,8 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>src/</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -114,7 +147,6 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalIncludeDirectories>src/</AdditionalIncludeDirectories>
-      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -129,8 +161,8 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>src/</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>src/</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -139,41 +171,6 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
-  <ItemGroup>
-    <ClCompile Include="src\hash\FarmHash.cpp" />
-    <ClCompile Include="src\hash\HashLib.cpp" />
-    <ClCompile Include="src\idlib\cleaner_pass2.cpp" />
-    <ClCompile Include="src\entityslayer\EntityLogger.cpp" />
-    <ClCompile Include="src\entityslayer\EntityNode.cpp" />
-    <ClCompile Include="src\entityslayer\EntityParser.cpp" />
-    <ClCompile Include="src\entityslayer\GenericBlockAllocator.cpp" />
-    <ClCompile Include="src\entityslayer\Oodle.cpp" />
-    <ClCompile Include="src\idlib\cleaner_pass1.cpp" />
-    <ClCompile Include="src\idlib\deserialcore.cpp" />
-    <ClCompile Include="src\idlib\generated\deserialgenerated.cpp" />
-    <ClCompile Include="src\idlib\reflector.cpp" />
-    <ClCompile Include="src\idlib\serialcore.cpp" />
-    <ClCompile Include="src\idlib\staticsparser.cpp" />
-    <ClCompile Include="src\io\BinaryReader.cpp" />
-    <ClCompile Include="src\io\BinaryWriter.cpp" />
-    <ClCompile Include="src\Main.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="src\entityslayer\EntityLogger.h" />
-    <ClInclude Include="src\entityslayer\EntityNode.h" />
-    <ClInclude Include="src\entityslayer\EntityParser.h" />
-    <ClInclude Include="src\entityslayer\GenericBlockAllocator.h" />
-    <ClInclude Include="src\entityslayer\Oodle.h" />
-    <ClInclude Include="src\hash\HashLib.h" />
-    <ClInclude Include="src\idlib\cleaner.h" />
-    <ClInclude Include="src\idlib\deserialcore.h" />
-    <ClInclude Include="src\idlib\generated\deserialgenerated.h" />
-    <ClInclude Include="src\idlib\reflector.h" />
-    <ClInclude Include="src\idlib\serialcore.h" />
-    <ClInclude Include="src\idlib\staticsparser.h" />
-    <ClInclude Include="src\io\BinaryReader.h" />
-    <ClInclude Include="src\io\BinaryWriter.h" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

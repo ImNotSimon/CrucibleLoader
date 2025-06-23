@@ -15,7 +15,7 @@ namespace deserial {
 
 const char* desCppStart =
 R"(#include "deserialgenerated.h"
-#include "idlib/deserialcore.h"
+#include "deserialcore.h"
 #include "io/BinaryReader.h"
 #include <cassert>
 
@@ -411,12 +411,12 @@ class idlibReflector {
 
     void OutputFiles() {
         desheader.push_back('}');
+        std::ofstream writer = std::ofstream("../deserializer/src/generated/deserialgenerated.h", std::ios_base::binary);
 
-        std::ofstream writer = std::ofstream("src/idlib/generated/deserialgenerated.h", std::ios_base::binary);
         writer.write(desheader.data(), desheader.length());
         writer.close();
 
-        writer.open("src/idlib/generated/deserialgenerated.cpp", std::ios_base::binary);
+        writer.open("../deserializer/src/generated/deserialgenerated.cpp", std::ios_base::binary);
         writer.write(descpp.data(), descpp.length());
         writer.close();
     }
@@ -425,7 +425,7 @@ class idlibReflector {
 void idlibReflection::Generate() {
 
     printf("Engaging idlib Reflector shields\n");
-    EntityParser parser = EntityParser("input/idlibcleaned.txt", ParsingMode::PERMISSIVE);
+    EntityParser parser = EntityParser("../input/idlibcleaned.txt", ParsingMode::PERMISSIVE);
     EntNode* root = parser.getRoot();
 
     

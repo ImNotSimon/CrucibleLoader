@@ -3,12 +3,13 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
-bin/*
+common/bin/*
+deserializer/bin/*
+reflector/bin/*
 input/*
-generated/*
 
-# Remove me later
-src/idlib/generated/*
+# Do not include 90 thousand line reflection files in the repository....
+deserializer/src/generated/*
 
 # User-specific files
 *.rsuser
