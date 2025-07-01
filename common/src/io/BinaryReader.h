@@ -91,6 +91,19 @@ class BinaryReader
 		return true;
 	}
 
+	bool ReadCString(const char*& writeTo)
+	{
+		const char* iter = next;
+		while (iter < max) {
+			if (*iter++ == '\0') {
+				writeTo = next;
+				next+= (iter - next);
+				return true;
+			}
+		}
+		return false;
+	}
+
 	bool ReadLE(int8_t& readTo)
 	{
 		if(next + 1 > max)
