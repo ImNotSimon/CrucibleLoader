@@ -155,13 +155,11 @@
     <ClCompile Include="src\deserialcore.cpp" />
     <ClCompile Include="src\DeserialMain.cpp" />
     <ClCompile Include="src\generated\deserialgenerated.cpp" />
-    <ClCompile Include="src\serialcore.cpp" />
     <ClCompile Include="src\staticsparser.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\deserialcore.h" />
     <ClInclude Include="src\generated\deserialgenerated.h" />
-    <ClInclude Include="src\serialcore.h" />
     <ClInclude Include="src\staticsparser.h" />
   </ItemGroup>
   <ItemGroup>

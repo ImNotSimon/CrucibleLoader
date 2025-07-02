@@ -1,12 +1,16 @@
 #pragma once
 
+//#define DOOMETERNAL
+
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned uint32_t;
 typedef long long int64_t;
 typedef unsigned long long uint64_t;
 
-
+#ifdef DOOMETERNAL
+#pragma pack(push, 1)
+#endif
 struct ResourceHeader {
     char      magic[4];                    
     uint32_t  version;					 
@@ -25,15 +29,17 @@ struct ResourceHeader {
     uint64_t  stringTableOffset;		 
     uint64_t  metaEntriesOffset;		 
     uint64_t  resourceEntriesOffset;	 
-    uint64_t  resourceDepsOffset;		 
+    uint64_t  resourceDepsOffset;
     uint64_t  resourceSpecialHashOffset; 
     uint64_t  dataOffset;
+	#ifdef DOOMETERNAL
+	uint32_t unknown; // Creates 4 bytes of wasted space with default alignment
+	uint64_t metaSize;
+	#endif
 };
-
-struct ResourceHeader_Eternal : public ResourceHeader {
-	uint32_t unknown;
-	uint64_t metaSize; // 4 bytes of unused space
-};
+#ifdef DOOMETERNAL
+#pragma pack(pop)
+#endif
 
 struct ResourceEntry
 {
@@ -71,10 +77,12 @@ struct StringChunk {
 	uint64_t numStrings;
 	uint64_t* offsets = nullptr;   // numStrings - Relative to byte after the offset list
 	const char** values = nullptr; // numStrings
+	char* dataBlock = nullptr;
 
 	~StringChunk() {
 		delete[] offsets;
 		delete[] values;
+		delete[] dataBlock;
 	}
 };
 
@@ -87,6 +95,8 @@ struct ResourceDependency {
 };
 
 struct ResourceArchive {
+	char* bufferData = nullptr;
+
 	ResourceHeader header;
 
 	//FSeek(header.resourceEntriesOffset);
@@ -101,6 +111,7 @@ struct ResourceArchive {
 	uint64_t* stringIndex = nullptr; // header.numStringIndices
 
 	~ResourceArchive() {
+		delete[] bufferData;
 		delete[] entries;
 		delete[] dependencies;
 		delete[] dependencyIndex;

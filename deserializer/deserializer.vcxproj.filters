@@ -21,9 +21,6 @@
     <ClCompile Include="src\deserialcore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\serialcore.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\staticsparser.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -33,9 +30,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\deserialcore.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\serialcore.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\staticsparser.h">

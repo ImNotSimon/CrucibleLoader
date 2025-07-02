@@ -1,4 +1,6 @@
 #include "io/BinaryReader.h"
+#include "io/BinaryWriter.h"
+#include "hash/HashLib.h"
 #include "entityslayer/EntityParser.h"
 #include "ResourceStructs.h"
 #include <cassert>
@@ -29,7 +31,7 @@ void Get_EntryStrings(const ResourceArchive& r, const ResourceEntry& e, const ch
 	nameString = r.stringChunk.values[*(stringBuffer + 1)];
 }
 
-void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r, BinaryReader& reader) {
+void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r) {
 
 	int fileCount = 0;
 
@@ -71,11 +73,10 @@ void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r, Bin
 			//std::cout << "Directory Creation Failed " << fileDir << "\n";
 		}
 
-		assert(reader.Goto(e.dataOffset));
-		assert(reader.GetRemaining() >= e.dataSize);
+		char* dataLocation = r.bufferData + (e.dataOffset - r.header.dataOffset);
 
 		std::ofstream outputFile(fileDir / archivePath.filename(), std::ios_base::binary);
-		outputFile.write(reader.GetNext(), e.dataSize);
+		outputFile.write(dataLocation, e.dataSize);
 		outputFile.close();
 		fileCount++;
 	}
@@ -87,77 +88,68 @@ void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r, Bin
 * READING FUNCTIONS
 */
 
-void Read_ResourceHeader(ResourceHeader& h, BinaryReader& reader) {
-	assert(reader.GetRemaining() >= sizeof(ResourceHeader));
-	memcpy(&h, reader.GetNext(), sizeof(ResourceHeader));
-	assert(reader.GoRight(sizeof(ResourceHeader)));
-}
+enum ResourceFlags {
+	RF_ReadEverything = 0,
+	RF_SkipData = 1 << 0,
+	RF_HeaderOnly = 1 << 1
+};
 
-void Read_ResourceHeader_Eternal(ResourceHeader_Eternal& h, BinaryReader& reader) {
-	Read_ResourceHeader(h, reader);
-	assert(reader.ReadLE(h.unknown));
-	assert(reader.ReadLE(h.metaSize));
-}
+void Read_ResourceArchive(ResourceArchive& r, const std::string pathString, int flags) {
 
-void Read_StringChunk(StringChunk& s, BinaryReader& reader) {
-	assert(reader.ReadLE(s.numStrings));
-	s.offsets = new uint64_t[s.numStrings];
-	s.values  = new const char* [s.numStrings];
+	// Read the Header
+	std::ifstream opener(pathString, std::ios_base::binary);
+	assert(opener.good());
+	opener.read(reinterpret_cast<char*>(&r.header), sizeof(ResourceHeader));
+	if(flags & RF_HeaderOnly)
+		return;
 
-	memcpy(s.offsets, reader.GetNext(), sizeof(uint64_t) * s.numStrings);
-	assert(reader.GoRight(s.numStrings * sizeof(uint64_t)));
-
-	BinaryReader stringReader(reader.GetNext(), reader.GetRemaining());
-	for (uint64_t i = 0; i < s.numStrings; i++) {
-		assert(stringReader.Goto(s.offsets[i]));
-		assert(stringReader.ReadCString(s.values[i]));
-	}
-
-	uint8_t endByte;
-	//assert(stringReader.ReadLE(endByte));
-	//assert(endByte == 0);
-	// Can be multiple null bytes at the end of the chunk (or even none)
-	//assert(stringReader.ReachedEOF());
-	//printf("%zu\n", stringReader.GetRemaining());
-	//printf("num strings %zu\n", s.numStrings);
-}
-
-void Read_ResourceArchive(ResourceArchive& r, BinaryReader& reader) {
-	Read_ResourceHeader(r.header, reader);
-
-	// Read the String Chunk
-	size_t copySize = 0;
-	BinaryReader stringReader = BinaryReader(reader.GetBuffer() + r.header.stringTableOffset, r.header.stringTableSize);
-	Read_StringChunk(r.stringChunk, stringReader);
 
 	// Read the Resource Entries
 	r.entries = new ResourceEntry[r.header.numResources];
-	copySize = sizeof(ResourceEntry) * r.header.numResources;
+	opener.seekg(r.header.resourceEntriesOffset);
+	opener.read(reinterpret_cast<char*>(r.entries), r.header.numResources * sizeof(ResourceEntry));
 
-	assert(reader.Goto(r.header.resourceEntriesOffset));
-	memcpy(r.entries, reader.GetNext(), copySize);
-	assert(reader.GoRight(copySize));
+	
+	// Read the String Chunk
+	// TODO: READ OFFSETS TO CONST CHAR** BUFFER, THEN ADD dataBlock address to them
+	opener.seekg(r.header.stringTableOffset);
+	opener.read(reinterpret_cast<char*>(&r.stringChunk.numStrings), sizeof(uint64_t));
+	r.stringChunk.offsets = new uint64_t[r.stringChunk.numStrings];
+	r.stringChunk.values = new const char*[r.stringChunk.numStrings];
+	r.stringChunk.dataBlock = new char[r.header.stringTableSize - r.stringChunk.numStrings * sizeof(uint64_t) - sizeof(uint64_t)];
+	opener.read( reinterpret_cast<char*>(r.stringChunk.offsets), r.stringChunk.numStrings * sizeof(uint64_t));
+	opener.read( r.stringChunk.dataBlock, r.header.stringTableSize - r.stringChunk.numStrings * sizeof(uint64_t) - sizeof(uint64_t));
+	for(uint64_t i = 0; i < r.stringChunk.numStrings; i++)
+		r.stringChunk.values[i] = r.stringChunk.dataBlock + r.stringChunk.offsets[i];
+
 
 	// Initialize Dependency Data
 	r.dependencies = new ResourceDependency[r.header.numDependencies];
 	r.dependencyIndex = new uint32_t[r.header.numDepIndices];
 	r.stringIndex = new uint64_t[r.header.numStringIndices];
 
-	// Read Dependency Structs
-	copySize = r.header.numDependencies * sizeof(ResourceDependency);
-	assert(reader.Goto(r.header.resourceDepsOffset));
-	memcpy(r.dependencies, reader.GetNext(), copySize);
-	assert(reader.GoRight(copySize));
+	// Read Dependency Data
+	// There can be a varying number of null bytes after the final string (or none at all)
+	// Hence we have to jump to the dependency offset and can't just read from where we stopped.
+	opener.seekg(r.header.resourceDepsOffset);
+	opener.read(reinterpret_cast<char*>(r.dependencies), r.header.numDependencies * sizeof(ResourceDependency));
+	opener.read(reinterpret_cast<char*>(r.dependencyIndex), r.header.numDepIndices * sizeof(uint32_t));
+	opener.read(reinterpret_cast<char*>(r.stringIndex), r.header.numStringIndices * sizeof(uint64_t));
 
-	// Ready Dependency Indices
-	copySize = r.header.numDepIndices * sizeof(uint32_t);
-	memcpy(r.dependencyIndex, reader.GetNext(), copySize);
-	assert(reader.GoRight(copySize));
+	// TODO: must take note of IDCL size - develop assert for it
+	// TODO: Account for location of data now being = file_offset - data_offset
+	if(flags & RF_SkipData)
+		return;
 
-	// Read String Indices
-	copySize = r.header.numStringIndices * sizeof(uint64_t);
-	memcpy(r.stringIndex, reader.GetNext(), copySize);
-	assert(reader.GoRight(copySize));
+	// Determine size of data block
+	opener.seekg(0, std::ios_base::beg);
+	opener.seekg(0, std::ios_base::end);
+	uint64_t fileLength = static_cast<uint64_t>(opener.tellg());
+	opener.seekg(r.header.dataOffset);
+
+	// Read the data block
+	r.bufferData = new char[fileLength - r.header.dataOffset];
+	opener.read(r.bufferData, fileLength - r.header.dataOffset);
 }
 
 /*
@@ -198,17 +190,11 @@ void String_ResourceHeader(const ResourceHeader& h, std::string& writeTo) {
 
 	ts(dataOffset);
 
-	writeTo.append("}\n");
-}
+	#ifdef DOOMETERNAL
+	ts(unknown);
+	ts(metaSize);
+	#endif
 
-void String_ResourceHeader_Eternal(const ResourceHeader_Eternal& h, std::string& writeTo) {
-	String_ResourceHeader(h, writeTo);
-	writeTo.pop_back();
-	writeTo.pop_back();
-	writeTo.push_back('\n');
-
-	ts(unknown)
-	ts(metaSize)
 	writeTo.append("}\n");
 }
 
@@ -246,27 +232,28 @@ void String_ResourceArchive(const ResourceArchive& r, std::string& writeTo) {
 	writeTo.append("}\n");
 }
 
-
-
-
-
-
 /*
 * Testing
 */
 
 
 void Test_DumpAllHeaders() {
-	const char* dirDA = "D:/Steam/steamapps/common/DOOMTheDarkAges/";
-	const char* dirEternal = "D:/Steam/steamapps/common/DOOMEternal/";
+
+	#ifdef DOOMETERNAL
+	const char* dirGame = "D:/Steam/steamapps/common/DOOMEternal/";
+	const char* outputPath = "../input/archiveHeaders_Eternal.txt";
+	#else
+	const char* dirGame = "D:/Steam/steamapps/common/DOOMTheDarkAges/";
+	const char* outputPath = "../input/archiveHeaders_DarkAges.txt";
+	#endif
+	
 	std::string text;
 
-	text.append("DarkAges = {\n");
-	for (const auto& entry : std::filesystem::recursive_directory_iterator(dirDA)) {
+	text.append("Headers = {\n");
+	for (const auto& entry : std::filesystem::recursive_directory_iterator(dirGame)) {
 
 		if (entry.is_directory())
 			continue;
-
 		if(entry.path().extension() != ".resources")
 			continue;
 
@@ -277,60 +264,23 @@ void Test_DumpAllHeaders() {
 		text.append(filename);
 		text.append("\" = {");
 
-
-		BinaryOpener opener = BinaryOpener(entry.path().string());
-		BinaryReader reader = opener.ToReader();
-
-		ResourceHeader header;
-		Read_ResourceHeader(header, reader);
-		String_ResourceHeader(header, text);
-
-		text.append("}\n");
-	}
-
-	text.append("}\nEternal = {\n");
-	for (const auto& entry : std::filesystem::recursive_directory_iterator(dirEternal)) {
-
-		if (entry.is_directory())
-			continue;
-
-		if (entry.path().extension() != ".resources")
-			continue;
-
-		std::string filename = entry.path().filename().string();
-
-		printf("%.*s\n", (int)filename.length(), filename.data());
-		text.push_back('"');
-		text.append(filename);
-		text.append("\" = {");
-
-
-		BinaryOpener opener = BinaryOpener(entry.path().string());
-		BinaryReader reader = opener.ToReader();
-
-		ResourceHeader_Eternal header;
-		Read_ResourceHeader_Eternal(header, reader);
-		String_ResourceHeader_Eternal(header, text);
-
+		ResourceArchive archive;
+		Read_ResourceArchive(archive, entry.path().string(), RF_HeaderOnly);
+		String_ResourceHeader(archive.header, text);
 		text.append("}\n");
 	}
 	text.append("}\n");
-
-
 	std::ofstream output;
-	output.open("../input/archiveHeaders.txt", std::ios_base::binary);
+	output.open(outputPath, std::ios_base::binary);
 	output << text;
 	output.close();
 }
 
 void Test_DumpCommonManifest() {
 	const char* path = "D:/Steam/steamapps/common/DOOMTheDarkAges/base/common.resources";
-	BinaryOpener open(path);
-	assert(open.Okay());
-	BinaryReader reader = open.ToReader();
 
 	ResourceArchive archive;
-	Read_ResourceArchive(archive, reader);
+	Read_ResourceArchive(archive, path, RF_SkipData);
 
 	std::string stringForm;
 	String_ResourceArchive(archive, stringForm);
@@ -391,6 +341,7 @@ void Test_DumpPriorityManifest()
 	// STL Container happy fun time
 	std::vector<PriorityInfo> packages = Test_GetArchiveList("D:/steam/steamapps/common/DOOMTheDarkAges/base/packagemapspec.json");
 	std::unordered_map<std::string, std::vector<PackageManifest>> groupedPackages; // First in vector = higher priority
+	std::vector<std::string> packageNameList;
 
 	// Group patches by their "true" name
 	for (PriorityInfo& p : packages) {
@@ -409,6 +360,7 @@ void Test_DumpPriorityManifest()
 			patchlessName = p.name.substr(lastSlash + 1, period - lastSlash - 1);
 		}
 		groupedPackages[patchlessName].push_back({fullName, p.name});
+		packageNameList.push_back(fullName);
 	}
 
 	//for (auto& pair : groupedPackages) {
@@ -420,6 +372,8 @@ void Test_DumpPriorityManifest()
 	//}
 
 	const std::filesystem::path baseDir = "D:/steam/steamapps/common/DOOMTheDarkAges/base";
+	int maxNameLength = 0;
+	std::string longestName;
 	// Now we build a manifest
 	for (auto& pair : groupedPackages) 
 	{
@@ -428,12 +382,8 @@ void Test_DumpPriorityManifest()
 			PackageManifest& manifest = pair.second[index];
 			int numOverrides = 0;
 
-			BinaryOpener opener((baseDir / manifest.relativePath).string());
-			assert(opener.Okay());
-			BinaryReader reader = opener.ToReader();
-
 			ResourceArchive archive;
-			Read_ResourceArchive(archive, reader);
+			Read_ResourceArchive(archive, (baseDir / manifest.relativePath).string(), RF_SkipData);
 			
 
 			for (uint64_t entryIndex = 0; entryIndex < archive.header.numResources; entryIndex++)
@@ -441,6 +391,14 @@ void Test_DumpPriorityManifest()
 				ResourceEntry& e = archive.entries[entryIndex];
 				const char* typeString, *nameString;
 				Get_EntryStrings(archive, e, typeString, nameString);
+				int nameLength = strlen(nameString);
+				if(nameLength > maxNameLength){
+					if(strcmp(typeString, "rs_streamfile") == 0) {
+						maxNameLength = nameLength;
+						longestName = nameString;
+					}
+
+				}
 
 				std::string setString = typeString;
 				setString.push_back('/');
@@ -465,6 +423,7 @@ void Test_DumpPriorityManifest()
 		}
 	}
 
+	std::cout << "Longest Name Length " << longestName << " " << maxNameLength << "\n";
 	std::cout << "Putting it all together\n";
 	std::unordered_map<std::string, std::vector<std::string>> filesToArchives; // ME DYNAMIC MEMORY MANAGEMENT SO GOOD AAAAAAGGGGGGGHHHHH
 
@@ -476,26 +435,65 @@ void Test_DumpPriorityManifest()
 		}
 	}
 
-	std::string textForm;
-	textForm.reserve(10000000);
+	// Output the plaintext version of the manifest
+	{
+		std::string textForm;
+		textForm.reserve(10000000);
 
-	for (auto& pair : filesToArchives) {
-		textForm.push_back('"');
-		textForm.append(pair.first);
-		textForm.append("\" \"");
+		for (auto& pair : filesToArchives) {
+			textForm.push_back('"');
+			textForm.append(pair.first);
+			textForm.append("\" \"");
 
-		for (std::string& archiveName : pair.second) {
-			textForm.append(archiveName);
-			textForm.push_back(' ');
+			for (std::string& archiveName : pair.second) {
+				textForm.append(archiveName);
+				textForm.push_back(' ');
+			}
+			textForm.pop_back();
+			textForm.append("\"\n");
 		}
-		textForm.pop_back();
-		textForm.append("\"\n");
+
+		const char* outputPath = "D:/Modding/dark ages/EntityAtlan/input/autoMappingNewReader.txt";
+		std::ofstream open(outputPath, std::ios_base::binary);
+		open << textForm;
+		open.close();
 	}
 
-	const char* outputPath = "D:/Modding/dark ages/EntityAtlan/input/autoMapping.txt";
-	std::ofstream open(outputPath, std::ios_base::binary);
-	open << textForm;
-	open.close();
+	// Output a binary version of the manifest
+	std::cout << "Outputing Binary Version\n";
+	{
+		BinaryWriter writer(2500000, 2.0f);
+		uint32_t versionNumber = 1;
+		uint32_t archiveCount = (uint32_t)packageNameList.size();
+		uint32_t archiveMappingCount = (uint32_t)filesToArchives.size();
+
+		writer << versionNumber << archiveCount << archiveMappingCount;
+
+		std::set<uint64_t> farmHashes;
+		std::unordered_map<std::string, short> archiveIndexMap;
+		for (size_t i = 0; i < packageNameList.size(); i++) {
+			std::string& s = packageNameList[i];
+			archiveIndexMap[s] = static_cast<short>(i);
+			writer << static_cast<short>(s.length());
+			writer.WriteBytes(s.data(), s.length());
+		}
+
+		for (auto& pair : filesToArchives) {
+			uint64_t pathHash = HashLib::FarmHash64(pair.first.data(), pair.first.length());
+			assert(farmHashes.find(pathHash) == farmHashes.end());
+			farmHashes.insert(pathHash);
+
+			writer << pathHash << static_cast<uint16_t>(pair.second.size());
+			for (std::string& arc : pair.second) {
+				auto iter = archiveIndexMap.find(arc);
+				assert(iter != archiveIndexMap.end());
+				writer << iter->second;
+			}
+			
+		}
+
+		writer.SaveTo("../input/autoMappingBinary.txt");
+	}
 }
 
 
@@ -530,29 +528,32 @@ void Test_DumpConsolidatedFiles(const char* installFolder, const char* outputFol
 
 		std::filesystem::path resPath = PathBase / packages[i].name;
 		std::cout << "Dumping: " << resPath.string() << "\n";
-		
-		// Read the archive to memory
-		BinaryOpener resourceBytes(resPath.string());
-		assert(resourceBytes.Okay());
-		BinaryReader resourceReader = resourceBytes.ToReader();
 
 		// Parse the archive
 		ResourceArchive archive;
-		Read_ResourceArchive(archive, resourceReader);
+		Read_ResourceArchive(archive, resPath.string(), RF_ReadEverything);
 
-		//
-		ExtractFiles(PathOutput, archive, resourceReader);
+		ExtractFiles(PathOutput, archive);
 	}
-
-	// Group the resource archives by their patches
-	//std::vector<std::vector<Package>> groupedPackages;
 
 }
 
 
 int main(int argc, char* argv[]) {
 	//printf("%d", argc);
-	Test_DumpPriorityManifest();
+	Test_DumpAllHeaders();
+	//Test_DumpPriorityManifest();
 	//Test_DumpConsolidatedFiles("D:/Steam/steamapps/common/DOOMTheDarkAges", "../input");
 	//Test_DumpCommonManifest();
+
+	//BinaryWriter writer(1000, 2.0f);
+
+	//int i = 1;
+	//char c = 'e';
+	//writer.pushSizeStack();
+	//writer << i << c;
+	//std::string_view s = "asdf";
+	//writer.WriteBytes(s.data(), s.length());
+	//writer.popSizeStack();
+	//writer.SaveTo("../input/BinaryWriterTest.txt");
 }
