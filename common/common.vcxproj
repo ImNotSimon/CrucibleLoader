@@ -28,6 +28,7 @@
     <ClCompile Include="src\hash\HashLib.cpp" />
     <ClCompile Include="src\io\BinaryReader.cpp" />
     <ClCompile Include="src\io\BinaryWriter.cpp" />
+    <ClCompile Include="src\miniz\miniz.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\entityslayer\EntityLogger.h" />
@@ -38,6 +39,7 @@
     <ClInclude Include="src\hash\HashLib.h" />
     <ClInclude Include="src\io\BinaryReader.h" />
     <ClInclude Include="src\io\BinaryWriter.h" />
+    <ClInclude Include="src\miniz\miniz.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

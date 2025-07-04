@@ -20,3 +20,94 @@ uint64_t HashLib::DeclHash(std::string_view type, std::string_view name) {
 
 	return v10;
 }
+
+/*
+* Credits: MurmurHash implementation was taken from 
+* https://github.com/explosion/murmurhash/blob/master/murmurhash/MurmurHash2.cpp#L176
+*/
+
+
+static inline uint32_t getblock(const uint32_t* p)
+{
+	#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+	return *p;
+	#else
+	const uint8_t* c = (const uint8_t*)p;
+	return (uint32_t)c[0] |
+		(uint32_t)c[1] << 8 |
+		(uint32_t)c[2] << 16 |
+		(uint32_t)c[3] << 24;
+	#endif
+}
+
+static inline uint64_t getblock(const uint64_t* p)
+{
+	#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+	return *p;
+	#else
+	const uint8_t* c = (const uint8_t*)p;
+	return (uint64_t)c[0] |
+		(uint64_t)c[1] << 8 |
+		(uint64_t)c[2] << 16 |
+		(uint64_t)c[3] << 24 |
+		(uint64_t)c[4] << 32 |
+		(uint64_t)c[5] << 40 |
+		(uint64_t)c[6] << 48 |
+		(uint64_t)c[7] << 56;
+	#endif
+}
+
+uint64_t MurmurHash64B(const void* key, int len, uint64_t seed)
+{
+	const uint32_t m = 0x5bd1e995;
+	const int r = 24;
+
+	uint32_t h1 = uint32_t(seed) ^ len;
+	uint32_t h2 = uint32_t(seed >> 32);
+
+	const uint32_t* data = (const uint32_t*)key;
+
+	while (len >= 8)
+	{
+		uint32_t k1 = getblock(data++);
+		k1 *= m; k1 ^= k1 >> r; k1 *= m;
+		h1 *= m; h1 ^= k1;
+		len -= 4;
+
+		uint32_t k2 = getblock(data++);
+		k2 *= m; k2 ^= k2 >> r; k2 *= m;
+		h2 *= m; h2 ^= k2;
+		len -= 4;
+	}
+
+	if (len >= 4)
+	{
+		uint32_t k1 = getblock(data++);
+		k1 *= m; k1 ^= k1 >> r; k1 *= m;
+		h1 *= m; h1 ^= k1;
+		len -= 4;
+	}
+
+	switch (len)
+	{
+		case 3: h2 ^= ((unsigned char*)data)[2] << 16;
+		case 2: h2 ^= ((unsigned char*)data)[1] << 8;
+		case 1: h2 ^= ((unsigned char*)data)[0];
+		h2 *= m;
+	};
+
+	h1 ^= h2 >> 18; h1 *= m;
+	h2 ^= h1 >> 22; h2 *= m;
+	h1 ^= h2 >> 17; h1 *= m;
+	h2 ^= h1 >> 19; h2 *= m;
+
+	uint64_t h = h1;
+
+	h = (h << 32) | h2;
+
+	return h;
+}
+
+uint64_t HashLib::ResourceMurmurHash(std::string_view data) {
+	return MurmurHash64B(data.data(), data.length(), 0xDEADBEEFUL);
+}

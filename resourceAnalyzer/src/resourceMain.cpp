@@ -3,6 +3,7 @@
 #include "hash/HashLib.h"
 #include "entityslayer/EntityParser.h"
 #include "ResourceStructs.h"
+#include "ModReader.h"
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -14,6 +15,14 @@
 #define assert(OP) (OP)
 #endif
 
+typedef std::filesystem::path fspath;
+
+struct ResTestParms {
+	fspath gamedir;
+	fspath outputdir;
+
+	void(*runFunction)() = nullptr;
+};
 
 /*
 * GETTERS / DATA MANIPULATION
@@ -85,6 +94,132 @@ void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r) {
 }
 
 /*
+* DIAGNOSTICS
+*/
+
+void Audit_ResourceHeader(const ResourceHeader& h)
+{
+	assert(h.magic[0] == 'I' && h.magic[1] == 'D' && h.magic[2] == 'C' && h.magic[3] == 'L');
+	
+	#ifdef DOOMETERNAL
+	assert(h.version == 12);
+	assert(h.unknown == 0);
+	assert(h.metaOffset == h.resourceDepsOffset + h.numDependencies * sizeof(ResourceDependency) + h.numDepIndices * sizeof(uint32_t) + h.numStringIndices * sizeof(uint64_t));
+	#else
+	assert(h.version == 13);
+	#endif
+
+	// Constants
+	assert(h.flags == 0);
+	assert(h.numSegments == 1);
+	assert(h.segmentSize == 1099511627775UL);
+	assert(h.metadataHash == 0);
+	assert(h.numSpecialHashes == 0);
+	assert(h.numMetaEntries == 0);
+	assert(h.metaEntriesSize == 0);
+	
+	// Size Arithmetic
+	assert(h.resourceEntriesOffset == sizeof(ResourceHeader));
+	assert(h.resourceEntriesOffset + h.numResources * sizeof(ResourceEntry) == h.stringTableOffset);
+	assert(h.stringTableOffset + h.stringTableSize == h.resourceDepsOffset);
+	assert(h.stringTableOffset + h.stringTableSize == h.metaEntriesOffset);
+	assert(h.resourceDepsOffset + h.numDependencies * sizeof(ResourceDependency) == h.resourceSpecialHashOffset);
+}
+
+struct TypeAuditData {
+	std::set<std::string> fileExtensions;
+};
+
+struct AuditData {
+	std::unordered_map<std::string, TypeAuditData> typeData;
+};
+
+void Audit_ResourceArchive(const ResourceArchive& r, AuditData& log) {
+	Audit_ResourceHeader(r.header);
+
+	// Audit Entries
+	for (uint64_t i = 0; i < r.header.numResources; i++) {
+
+		const ResourceEntry& e = r.entries[i];
+		const char *typeString = nullptr, *nameString = nullptr;
+		Get_EntryStrings(r, e, typeString, nameString);
+
+		assert(e.resourceTypeString == 0);
+		assert(e.nameString == 1);
+		assert(e.descString == -1);
+		assert(e.strings == i * 2);
+		assert(e.specialHashes == 0);
+		assert(e.metaEntries == 0);
+
+		if(e.compMode == 0) {
+			assert(e.dataSize == e.uncompressedSize);
+
+			// Not Guaranteed
+			//assert(e.dataCheckSum == e.defaultHash);
+		}
+		// e.dataCheckSum, e.generationTimeStamp, e.defaultHash, e.version, e.flags, e.compMode
+		assert(e.reserved0 == 0);
+		// e.variation
+		assert(e.reserved2 == 0);
+		assert(e.reservedForVariations == 0);
+		assert(e.numStrings == 2);
+		assert(e.numSources == 0);
+		// e.numDependencies
+		assert(e.numSpecialHashes == 0);
+		assert(e.numMetaEntries == 0);
+
+		/*
+		* The following may be tested by individual file type:
+		* - depIndices          - IGNORE - Can be non-zero even if numDependencies == 0
+		* - dataOffset          - IGNORE
+		* - dataSize
+		* - uncompressedSize    - CHECK if == uncompressedSize by file type
+		* - dataCheckSum
+		* - generationTimeStamp - IGNORE
+		* - defaultHash         - CHECK if == dataCheckSum by file type
+		* - version             - CHECK BY FILE TYPE
+		* - flags               - CHECK BY FILE TYPE
+		* - compMode            - CHECK BY FILE TYPE
+		* - variation           - CHECK BY FILE TYPE
+		* - numDependencies     - CHECK BY FILE TYPE
+		*/
+
+		if(strcmp(typeString, "rs_streamfile") == 0) {
+			assert(e.dataSize == e.uncompressedSize);
+			assert(e.dataCheckSum == e.defaultHash);
+			assert(e.version == 0);
+			assert(e.flags == 0);
+			assert(e.compMode == 0);
+			assert(e.variation == 0);
+			assert(e.numDependencies == 0);
+		}
+		else if(strcmp(typeString, "entityDef") == 0) {
+			//assert(e.dataSize != e.uncompressedSize);
+			//assert(e.dataCheckSum != e.defaultHash);
+			assert(e.version == 21);
+			assert(e.flags == 2);
+			//assert(e.compMode == 2 || e.compMode == 0);
+			assert(e.variation == 70);
+			//assert(e.numDependencies == 0);
+		}
+
+		/*
+		* Collect file extension data
+		*/
+		std::string_view nameView(nameString);
+		size_t period = nameView.find('.');
+		if (period != std::string_view::npos) {
+			std::string_view extString = nameView.substr(period);
+			log.typeData[typeString].fileExtensions.insert(std::string(extString));
+		}
+		else {
+			log.typeData[typeString].fileExtensions.insert("<NO EXTENSION>");
+		}
+	}
+
+}
+
+/*
 * READING FUNCTIONS
 */
 
@@ -94,7 +229,7 @@ enum ResourceFlags {
 	RF_HeaderOnly = 1 << 1
 };
 
-void Read_ResourceArchive(ResourceArchive& r, const std::string pathString, int flags) {
+void Read_ResourceArchive(ResourceArchive& r, const fspath pathString, int flags) {
 
 	// Read the Header
 	std::ifstream opener(pathString, std::ios_base::binary);
@@ -192,7 +327,7 @@ void String_ResourceHeader(const ResourceHeader& h, std::string& writeTo) {
 
 	#ifdef DOOMETERNAL
 	ts(unknown);
-	ts(metaSize);
+	ts(metaOffset);
 	#endif
 
 	writeTo.append("}\n");
@@ -216,16 +351,46 @@ void String_ResourceArchive(const ResourceArchive& r, std::string& writeTo) {
 	writeTo.append("files = {\n");
 
 	for (uint64_t i = 0; i < r.header.numResources; i++) {
-		ResourceEntry& e = r.entries[i];
+		ResourceEntry& h = r.entries[i];
 
 		const char *typeString = nullptr, *nameString = nullptr;
-		Get_EntryStrings(r, e, typeString, nameString);
+		Get_EntryStrings(r, h, typeString, nameString);
 
 		writeTo.push_back('"');
 		writeTo.append(typeString);
 		writeTo.append("\" \"");
 		writeTo.append(nameString);
-		writeTo.append("\"\n");
+		writeTo.append("\" {\n");
+
+		ts(resourceTypeString);
+		ts(nameString);
+		ts(descString);
+		ts(depIndices);
+		ts(strings);
+		ts(specialHashes);
+		ts(metaEntries);
+		ts(dataOffset);
+		ts(dataSize);
+
+		ts(uncompressedSize);
+		ts(dataCheckSum);
+		ts(generationTimeStamp);
+		ts(defaultHash);
+		ts(version);
+		ts(flags);
+		ts(compMode);
+		ts(reserved0);
+		ts(variation);
+		ts(reserved2);
+		ts(reservedForVariations);
+
+		ts(numStrings);
+		ts(numSources);
+		ts(numDependencies);
+		ts(numSpecialHashes);
+		ts(numMetaEntries);
+
+		writeTo.append("}\n");
 	}
 
 
@@ -276,51 +441,44 @@ void Test_DumpAllHeaders() {
 	output.close();
 }
 
-void Test_DumpCommonManifest() {
-	const char* path = "D:/Steam/steamapps/common/DOOMTheDarkAges/base/common.resources";
-
-	ResourceArchive archive;
-	Read_ResourceArchive(archive, path, RF_SkipData);
-
-	std::string stringForm;
-	String_ResourceArchive(archive, stringForm);
-
-	std::ofstream output("../input/common_manifest.txt", std::ios_base::binary);
-	output << stringForm;
-	output.close();
-}
-
-
-
 struct PriorityInfo {
 	std::string name;
 	int priority;
 };
 
-std::vector<PriorityInfo> Test_GetArchiveList(std::filesystem::path PathMapSpec)
+std::vector<PriorityInfo> Test_GetArchiveList(const fspath& installFolder)
 {
+	fspath pathMapSpec = installFolder / "base/packagemapspec.json";
+	if(!std::filesystem::exists(pathMapSpec))
+		return {};
+
 	std::vector<PriorityInfo> packages;
-	EntityParser parser(PathMapSpec.string(), ParsingMode::JSON);
+	try {
+		EntityParser parser(pathMapSpec.string(), ParsingMode::JSON);
 
-	EntNode* root = parser.getRoot()->ChildAt(0);
-	EntNode& files = (*root)["\"files\""];
+		EntNode* root = parser.getRoot()->ChildAt(0);
+		EntNode& files = (*root)["\"files\""];
 
-	// Get all resource archive names and their priorities
-	for (int i = 0; i < files.getChildCount(); i++) {
-		EntNode& name = (*files.ChildAt(i))["\"name\""];
+		// Get all resource archive names and their priorities
+		for (int i = 0; i < files.getChildCount(); i++) {
+			EntNode& name = (*files.ChildAt(i))["\"name\""];
 
-		assert(&name != EntNode::SEARCH_404);
+			assert(&name != EntNode::SEARCH_404);
 
-		std::string_view nameString = name.getValueUQ();
+			std::string_view nameString = name.getValueUQ();
 
-		// All of this...because the C++ 17 STL doesn't have EndsWith
-		std::string_view extString = ".resources";
-		size_t extIndex = nameString.rfind(extString);
-		if (extIndex != std::string_view::npos && extIndex + extString.length() == nameString.length()) 
-		{
-			//printf("%.*s\n", (int)nameString.length(), nameString.data());
-			packages.push_back({std::string(nameString), i});
+			// All of this...because the C++ 17 STL doesn't have EndsWith
+			std::string_view extString = ".resources";
+			size_t extIndex = nameString.rfind(extString);
+			if (extIndex != std::string_view::npos && extIndex + extString.length() == nameString.length())
+			{
+				//printf("%.*s\n", (int)nameString.length(), nameString.data());
+				packages.push_back({ std::string(nameString), i });
+			}
 		}
+	}
+	catch (std::exception e) {
+		return {};
 	}
 
 	return packages;
@@ -339,7 +497,7 @@ void Test_DumpPriorityManifest()
 	};
 
 	// STL Container happy fun time
-	std::vector<PriorityInfo> packages = Test_GetArchiveList("D:/steam/steamapps/common/DOOMTheDarkAges/base/packagemapspec.json");
+	std::vector<PriorityInfo> packages = Test_GetArchiveList("D:/steam/steamapps/common/DOOMTheDarkAges");
 	std::unordered_map<std::string, std::vector<PackageManifest>> groupedPackages; // First in vector = higher priority
 	std::vector<std::string> packageNameList;
 
@@ -391,9 +549,9 @@ void Test_DumpPriorityManifest()
 				ResourceEntry& e = archive.entries[entryIndex];
 				const char* typeString, *nameString;
 				Get_EntryStrings(archive, e, typeString, nameString);
-				int nameLength = strlen(nameString);
+				int nameLength = (int)strlen(nameString);
 				if(nameLength > maxNameLength){
-					if(strcmp(typeString, "rs_streamfile") == 0) {
+					if(strcmp(typeString, "image") == 0) {
 						maxNameLength = nameLength;
 						longestName = nameString;
 					}
@@ -500,26 +658,23 @@ void Test_DumpPriorityManifest()
 /*
 * CONSOLIDATED RESOURCE EXTRACTOR FUNCTION
 */
-void Test_DumpConsolidatedFiles(const char* installFolder, const char* outputFolder) {
+void Test_DumpConsolidatedFiles(fspath installFolder, fspath outputFolder) {
 	std::cout << "Dark Ages consolidated resource extractor by FlavorfulGecko5\n";
 
 	// Setup Paths
-	std::filesystem::path PathOutput = outputFolder;
-	PathOutput /= "geckoExporter";
-	std::filesystem::path PathBase = installFolder;
-	PathBase /= "base";
-	std::filesystem::path PathMapSpec = PathBase / "packagemapspec.json";
+	outputFolder /= "geckoExporter";
+	fspath PathBase = installFolder / "base";
+	std::vector<PriorityInfo> packages = Test_GetArchiveList(installFolder);
 
-	if (!std::filesystem::exists(PathMapSpec)) {
+	if (packages.empty()) {
 		std::cout << "FATAL ERROR: Could not find PackageMapSpec.json\n";
 		std::cout << "Did you enter the correct path to your Dark Ages folder?";
 	}
 	else {
 		std::cout << "Found DOOM The Dark Ages Folder\n";
-		std::cout << "Dumping data to " << std::filesystem::absolute(PathOutput) << "\n";
+		std::cout << "Dumping data to " << std::filesystem::absolute(outputFolder) << "\n";
 	}
-
-	std::vector<PriorityInfo> packages = Test_GetArchiveList(PathMapSpec);
+	std::filesystem::create_directories(outputFolder);
 
 	for (int i = (int)packages.size() - 1; i > -1; i--) {
 
@@ -533,27 +688,74 @@ void Test_DumpConsolidatedFiles(const char* installFolder, const char* outputFol
 		ResourceArchive archive;
 		Read_ResourceArchive(archive, resPath.string(), RF_ReadEverything);
 
-		ExtractFiles(PathOutput, archive);
+		ExtractFiles(outputFolder, archive);
 	}
+
+}
+
+/*
+* DUMPS MANIFEST FILES FOR ALL RESOURCE ARCHIVES IN THE GAME
+*/
+void Test_DumpManifests(fspath installDir, fspath outputDir) {
+	std::vector<PriorityInfo> packages = Test_GetArchiveList(installDir);
+	AuditData audit;
+
+	for (int i = 0; i < packages.size(); i++) {
+		std::cout << packages[i].name << "\n";
+		fspath resourcePath = installDir / "base" / packages[i].name;
+		fspath manifestPath = outputDir / "manifests" / resourcePath.stem();
+		manifestPath.concat(".txt");
+
+		ResourceArchive archive;
+		Read_ResourceArchive(archive, resourcePath, RF_SkipData);
+
+		// AUDIT ARCHIVES
+		Audit_ResourceArchive(archive, audit);
+		std::string auditText;
+		for(const auto& pair : audit.typeData) {
+			auditText.append(pair.first);
+			auditText.append(" = {\n");
+
+			for(const std::string& ext : pair.second.fileExtensions) {
+				auditText.push_back('"');
+				auditText.append(ext);
+				auditText.append("\"\n");
+			}
+
+			auditText.append("}\n");
+		}
+		std::ofstream auditOutput(outputDir / "auditResults.txt", std::ios_base::binary);
+		auditOutput << auditText;
+		auditOutput.close();
+
+		// BUILD MANIFEST
+		//std::string manifestString;
+		//String_ResourceArchive(archive, manifestString);
+		//std::ofstream output(manifestPath, std::ios_base::binary);
+		//output << manifestString;
+		//output.close();
+	}
+}
+
+void ModLoader(fspath gamedir, fspath outputdir) {
 
 }
 
 
 int main(int argc, char* argv[]) {
-	//printf("%d", argc);
-	Test_DumpAllHeaders();
+	#ifdef DOOMETERNAL
+	fspath gamedir = "D:/Steam/steamapps/common/DOOMEternal";
+	fspath outputdir = "../input/eternal"
+	#else
+	fspath gamedir = "D:/Steam/steamapps/common/DOOMTheDarkAges";
+	fspath outputdir = "../input/darkages";
+	#endif
+
+	ModDef mod;
+	ModReader::ReadZipMod(mod, "../input/testzip.zip");
+	//Test_DumpManifests(gamedir, outputdir);
+	//Test_DumpAllHeaders();
 	//Test_DumpPriorityManifest();
-	//Test_DumpConsolidatedFiles("D:/Steam/steamapps/common/DOOMTheDarkAges", "../input");
+	//Test_DumpConsolidatedFiles(gamedir, outputdir);
 	//Test_DumpCommonManifest();
-
-	//BinaryWriter writer(1000, 2.0f);
-
-	//int i = 1;
-	//char c = 'e';
-	//writer.pushSizeStack();
-	//writer << i << c;
-	//std::string_view s = "asdf";
-	//writer.WriteBytes(s.data(), s.length());
-	//writer.popSizeStack();
-	//writer.SaveTo("../input/BinaryWriterTest.txt");
 }

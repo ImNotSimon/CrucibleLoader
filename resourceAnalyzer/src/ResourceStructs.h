@@ -34,7 +34,7 @@ struct ResourceHeader {
     uint64_t  dataOffset;
 	#ifdef DOOMETERNAL
 	uint32_t unknown; // Creates 4 bytes of wasted space with default alignment
-	uint64_t metaSize;
+	uint64_t metaOffset;
 	#endif
 };
 #ifdef DOOMETERNAL
@@ -43,13 +43,13 @@ struct ResourceHeader {
 
 struct ResourceEntry
 {
-	int64_t   resourceTypeString;
-	int64_t   nameString;
-	int64_t   descString;
+	int64_t   resourceTypeString; // UNIVERSALLY 0 - String index of type string
+	int64_t   nameString;         // UNIVERSALLY 1 - String index of file name string
+	int64_t   descString;         // UNIVERSALLY -1 - String index of unused description string
 	uint64_t  depIndices;
-	uint64_t  strings;
-	uint64_t  specialHashes;
-	uint64_t  metaEntries;
+	uint64_t  strings;            // UNIVERSALLY <Entry Index> * 2
+	uint64_t  specialHashes;      // UNIVERSALLY 0
+	uint64_t  metaEntries;        // UNIVERSALLY 0
 	uint64_t  dataOffset; // Relative to beginning of archive
 	uint64_t  dataSize; // Not null-terminated
 
@@ -60,16 +60,16 @@ struct ResourceEntry
 	uint32_t  version;
 	uint32_t  flags;
 	uint8_t   compMode;
-	uint8_t   reserved0;
+	uint8_t   reserved0;              // UNIVERSALLY 0
 	uint16_t  variation;
-	uint32_t  reserved2;
-	uint64_t  reservedForVariations;
+	uint32_t  reserved2;              // UNIVERSALLY 0
+	uint64_t  reservedForVariations;  // UNIVERSALLY 0
 
-	uint16_t  numStrings;
-	uint16_t  numSources;
+	uint16_t  numStrings;       // UNIVERSALLY 2
+	uint16_t  numSources;       // UNIVERSALLY 0
 	uint16_t  numDependencies;
-	uint16_t  numSpecialHashes;
-	uint16_t  numMetaEntries;
+	uint16_t  numSpecialHashes; // UNIVERSALLY 0
+	uint16_t  numMetaEntries;   // UNIVERSALLY 0
     uint8_t   padding[6];
 };
 
