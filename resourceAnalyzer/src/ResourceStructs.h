@@ -1,6 +1,6 @@
 #pragma once
 
-//#define DOOMETERNAL
+#define DOOMETERNAL
 
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
@@ -50,7 +50,7 @@ struct ResourceEntry
 	uint64_t  strings;            // UNIVERSALLY <Entry Index> * 2
 	uint64_t  specialHashes;      // UNIVERSALLY 0
 	uint64_t  metaEntries;        // UNIVERSALLY 0
-	uint64_t  dataOffset; // Relative to beginning of archive
+	uint64_t  dataOffset; // Relative to beginning of archive - possibly 8-byte aligned
 	uint64_t  dataSize; // Not null-terminated
 
 	uint64_t  uncompressedSize;
@@ -76,12 +76,11 @@ struct ResourceEntry
 struct StringChunk {
 	uint64_t numStrings;
 	uint64_t* offsets = nullptr;   // numStrings - Relative to byte after the offset list
-	const char** values = nullptr; // numStrings
 	char* dataBlock = nullptr;
+	uint64_t paddingCount = 0; // Number of padding bytes at end of chunk. Enforces an 8-byte alignment
 
 	~StringChunk() {
 		delete[] offsets;
-		delete[] values;
 		delete[] dataBlock;
 	}
 };
@@ -109,6 +108,9 @@ struct ResourceArchive {
 	ResourceDependency* dependencies = nullptr; // header.numDependencies
 	uint32_t* dependencyIndex = nullptr; // header.numDepIndices
 	uint64_t* stringIndex = nullptr; // header.numStringIndices
+
+	uint64_t idclOffset; // Eternal archive already tells us this
+	uint64_t idclSize; // Size of IDCL block before data. 
 
 	~ResourceArchive() {
 		delete[] bufferData;

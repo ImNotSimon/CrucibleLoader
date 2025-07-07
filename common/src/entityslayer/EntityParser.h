@@ -51,7 +51,7 @@ class EntityParser {
 	* =====================
 	*/
 	private:
-	const ParsingMode PARSEMODE;
+	ParsingMode PARSEMODE;
 	bool fileWasCompressed;
 	EntNode root = EntNode(EntNode::NFC_RootNode);
 	BlockAllocator<char> textAlloc = BlockAllocator<char>(1000000);         // Allocator for node name/value buffers
@@ -68,6 +68,7 @@ class EntityParser {
 	bool wasFileCompressed();
 	bool FileUpToDate() { return fileUpToDate;}
 	ParsingMode getMode() { return PARSEMODE; };
+	void SwitchParseMode(ParsingMode newMode) {PARSEMODE = newMode;}
 
 	/* For Debugging */
 	void logAllocatorInfo(bool includeBlockList, bool logToLogger, bool logToFile, const std::string filepath = "");
@@ -110,6 +111,8 @@ class EntityParser {
 	public:
 	/* Constructs an EntityParser with minimal data */
 	EntityParser();
+
+	EntityParser(ParsingMode mode) : fileWasCompressed(false), PARSEMODE(mode) {}
 
 	/*
 	* Constructs an EntityParser containing fully parsed data from the given file

@@ -36,8 +36,11 @@ void Get_EntryStrings(const ResourceArchive& r, const ResourceEntry& e, const ch
 	assert(e.nameString == 1);
 	assert(e.descString == -1);
 
-	typeString = r.stringChunk.values[*stringBuffer];
-	nameString = r.stringChunk.values[*(stringBuffer + 1)];
+	uint64_t typeOffset = r.stringChunk.offsets[*stringBuffer];
+	uint64_t nameOffset = r.stringChunk.offsets[*(stringBuffer + 1)];
+	typeString = r.stringChunk.dataBlock + typeOffset;
+	nameString = r.stringChunk.dataBlock + nameOffset;
+
 }
 
 void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r) {
@@ -121,6 +124,7 @@ void Audit_ResourceHeader(const ResourceHeader& h)
 	// Size Arithmetic
 	assert(h.resourceEntriesOffset == sizeof(ResourceHeader));
 	assert(h.resourceEntriesOffset + h.numResources * sizeof(ResourceEntry) == h.stringTableOffset);
+	assert(h.stringTableSize % 8 == 0);
 	assert(h.stringTableOffset + h.stringTableSize == h.resourceDepsOffset);
 	assert(h.stringTableOffset + h.stringTableSize == h.metaEntriesOffset);
 	assert(h.resourceDepsOffset + h.numDependencies * sizeof(ResourceDependency) == h.resourceSpecialHashOffset);
@@ -167,6 +171,8 @@ void Audit_ResourceArchive(const ResourceArchive& r, AuditData& log) {
 		// e.numDependencies
 		assert(e.numSpecialHashes == 0);
 		assert(e.numMetaEntries == 0);
+
+		assert(e.dataOffset % 8 == 0);
 
 		/*
 		* The following may be tested by individual file type:
@@ -246,16 +252,20 @@ void Read_ResourceArchive(ResourceArchive& r, const fspath pathString, int flags
 
 	
 	// Read the String Chunk
-	// TODO: READ OFFSETS TO CONST CHAR** BUFFER, THEN ADD dataBlock address to them
 	opener.seekg(r.header.stringTableOffset);
 	opener.read(reinterpret_cast<char*>(&r.stringChunk.numStrings), sizeof(uint64_t));
 	r.stringChunk.offsets = new uint64_t[r.stringChunk.numStrings];
-	r.stringChunk.values = new const char*[r.stringChunk.numStrings];
 	r.stringChunk.dataBlock = new char[r.header.stringTableSize - r.stringChunk.numStrings * sizeof(uint64_t) - sizeof(uint64_t)];
 	opener.read( reinterpret_cast<char*>(r.stringChunk.offsets), r.stringChunk.numStrings * sizeof(uint64_t));
-	opener.read( r.stringChunk.dataBlock, r.header.stringTableSize - r.stringChunk.numStrings * sizeof(uint64_t) - sizeof(uint64_t));
-	for(uint64_t i = 0; i < r.stringChunk.numStrings; i++)
-		r.stringChunk.values[i] = r.stringChunk.dataBlock + r.stringChunk.offsets[i];
+
+	size_t stringBlockSize = r.header.stringTableSize - r.stringChunk.numStrings * sizeof(uint64_t) - sizeof(uint64_t);
+	opener.read( r.stringChunk.dataBlock, stringBlockSize);
+
+	// Count the number of padding bytes
+	while(r.stringChunk.dataBlock[--stringBlockSize] == '\0') {
+		r.stringChunk.paddingCount++;
+	}
+	r.stringChunk.paddingCount--; // We overcount by 1 due to the end string
 
 
 	// Initialize Dependency Data
@@ -338,10 +348,13 @@ void String_StringChunk(const StringChunk& s, std::string& writeTo) {
 
 	for (uint64_t i = 0; i < s.numStrings; i++) {
 		writeTo.push_back('"');
-		writeTo.append(s.values[i]);
+		writeTo.append(s.dataBlock + s.offsets[i]);
 		writeTo.append("\"\n");
 	}
 	writeTo.append("}\n");
+	writeTo.append("stringChunkPadding = ");
+	writeTo.append(std::to_string(s.paddingCount));
+	writeTo.append("\n");
 }
 
 void String_ResourceArchive(const ResourceArchive& r, std::string& writeTo) {
@@ -390,7 +403,32 @@ void String_ResourceArchive(const ResourceArchive& r, std::string& writeTo) {
 		ts(numSpecialHashes);
 		ts(numMetaEntries);
 
-		writeTo.append("}\n");
+		writeTo.append("dependencies = {\n");
+
+		uint32_t* depPtr = r.dependencyIndex + h.depIndices;
+		for(uint64_t depIndex = 0; depIndex < h.numDependencies; depIndex++) {
+			const ResourceDependency& d = r.dependencies[depPtr[depIndex]];
+
+			const char* dType = r.stringChunk.dataBlock + r.stringChunk.offsets[d.type];
+			const char* dName = r.stringChunk.dataBlock + r.stringChunk.offsets[d.name];
+
+			writeTo.append("\"");
+			writeTo.append(dType);
+			writeTo.append("\" \"");
+			writeTo.append(dName);
+			writeTo.append("\" {\n");
+			//writeTo.append("{\n");
+			//writeTo.append("type = "); writeTo.append(std::to_string(d.type));
+			//writeTo.append("\nname = "); writeTo.append(std::to_string(d.name));
+			
+			writeTo.append("\ndepType = "); writeTo.append(std::to_string(d.depType)); 
+			writeTo.append("\ndepSubType = "); writeTo.append(std::to_string(d.depSubType));
+			writeTo.append("\ntimestampOrHash = "); writeTo.append(std::to_string(d.hashOrTimestamp));
+
+			writeTo.append("\n}\n");
+		}
+
+		writeTo.append("}\n}\n");
 	}
 
 
@@ -729,15 +767,228 @@ void Test_DumpManifests(fspath installDir, fspath outputDir) {
 		auditOutput.close();
 
 		// BUILD MANIFEST
-		//std::string manifestString;
-		//String_ResourceArchive(archive, manifestString);
-		//std::ofstream output(manifestPath, std::ios_base::binary);
-		//output << manifestString;
-		//output.close();
+		std::string manifestString;
+		String_ResourceArchive(archive, manifestString);
+		std::ofstream output(manifestPath, std::ios_base::binary);
+		output << manifestString;
+		output.close();
 	}
 }
 
-void ModLoader(fspath gamedir, fspath outputdir) {
+/*
+* Resource Type Strings that will be placed at the start of the string table
+*/
+const char* StringTableStart[] = {"rs_streamfile", "entityDef"};
+
+
+void BuildArchive(const ModDef& mod, fspath gamedir, fspath outputdir, fspath archivename) {
+	ResourceArchive archive;
+	ResourceHeader& h = archive.header;
+	
+	/*
+	* Header Constants
+	*/
+	h.magic[0] = 'I'; h.magic[1] = 'D'; h.magic[2] = 'C'; h.magic[3] = 'L';
+	h.version = 13;
+	h.flags = 0;
+	h.numSegments = 1;
+	h.segmentSize = 1099511627775UL;
+	h.metadataHash = 0;
+	h.numSpecialHashes = 0;
+	h.numMetaEntries = 0;
+	h.metaEntriesSize = 0;
+	h.resourceEntriesOffset = sizeof(ResourceHeader);
+	h.numResources = static_cast<uint32_t>(mod.modFiles.size());
+	
+
+	/*
+	* Build String Chunk
+	*/
+	{
+		h.stringTableOffset = h.resourceEntriesOffset + h.numResources * sizeof(ResourceEntry);
+		archive.stringChunk.numStrings = sizeof(StringTableStart) / sizeof(StringTableStart[0]) + mod.modFiles.size();
+		archive.stringChunk.offsets = new uint64_t[archive.stringChunk.numStrings];
+		h.stringTableSize = sizeof(uint64_t) // String Count Variable
+			+ archive.stringChunk.numStrings * sizeof(uint64_t); // Offsets Section (8 bytes per string)
+
+		/*
+		* For the sake of simplicity, we write the string blob to a resizeable array, then copy it over
+		* to the final data buffer when finished
+		*/
+		std::string stringblob;
+		stringblob.reserve(mod.modFiles.size() * 75);
+		uint64_t runningIndex = 0, runningOffset = 0;
+
+		for(int i = 0; i < sizeof(StringTableStart) / sizeof(StringTableStart[0]); i++) {
+			const char* current = StringTableStart[i];
+			size_t len = strlen(current);
+
+			archive.stringChunk.offsets[runningIndex++] = runningOffset;
+			runningOffset+= len + 1; // Null char
+
+			stringblob.append(current, len);
+			stringblob.push_back('\0');
+		}
+		for(const ModFile& f : mod.modFiles) {
+			archive.stringChunk.offsets[runningIndex++] = runningOffset;
+			runningOffset += f.assetPath.length() + 1;
+
+			stringblob.append(f.assetPath);
+			stringblob.push_back('\0');
+		}
+		assert(runningOffset == stringblob.length());
+		assert(runningIndex == archive.stringChunk.numStrings);
+		h.stringTableSize += runningOffset;
+		archive.stringChunk.paddingCount = h.stringTableSize % 8;
+		h.stringTableSize += 8 - archive.stringChunk.paddingCount;
+
+		/*
+		* Copy over blob
+		*/
+		archive.stringChunk.dataBlock = new char[stringblob.length()];
+		memcpy(archive.stringChunk.dataBlock, stringblob.data(), stringblob.length());
+	}
+
+
+	/*
+	* Build String Indices
+	*/
+	{
+		h.numStringIndices = mod.modFiles.size() * 2;
+		archive.stringIndex = new uint64_t[h.numStringIndices];
+
+		uint64_t* ptr = archive.stringIndex;
+		for (uint64_t i = 0; i < mod.modFiles.size(); i++) {
+			const ModFile& f = mod.modFiles[i];
+			*ptr = static_cast<uint64_t>(f.assetType);
+			*(ptr + 1) = i + sizeof(StringTableStart) / sizeof(StringTableStart[0]);
+			ptr += 2;
+		}
+	}
+
+	/*
+	* Build Dependencies
+	* TODO: This section (and likely the string table) will need to be heavily revised.
+	* For now it's fine, since rs_streamfiles have no dependencies. But entitydefs do
+	*/
+
+	h.resourceDepsOffset = h.stringTableOffset + h.stringTableSize;
+	h.numDependencies = 0;
+	h.numDepIndices = 0;
+	h.metaEntriesOffset = h.resourceDepsOffset;
+	h.resourceSpecialHashOffset = h.resourceDepsOffset + h.numDependencies * sizeof(ResourceDependency);
+
+	
+	/*
+	* Configure IDCL Size and Data Offset
+	*/
+	archive.idclOffset = h.resourceDepsOffset + h.numDependencies * sizeof(ResourceDependency) 
+		+ h.numDepIndices * sizeof(uint32_t) + h.numStringIndices * sizeof(uint64_t);
+	archive.idclSize = 4;
+	if(archive.idclOffset % 8 == 0) // Ensure the data offset has an 8 byte alignment
+		archive.idclSize += 4;
+	h.dataOffset = archive.idclOffset + archive.idclSize;
+	assert(h.dataOffset % 8 == 0);
+
+
+	/*
+	* Build the resource entries
+	*/
+	archive.entries = new ResourceEntry[mod.modFiles.size()];
+	uint64_t runningDataOffset = h.dataOffset;
+	for(size_t i = 0; i < mod.modFiles.size(); i++) {
+		ResourceEntry& e = archive.entries[i];
+		const ModFile& f = mod.modFiles[i];
+
+		/*
+		* Set universal values
+		*/
+		e.resourceTypeString = 0;
+		e.nameString = 1;
+		e.descString = -1;
+		e.strings = i * 2;
+		e.specialHashes = 0;
+		e.metaEntries = 0;
+		e.reserved0 = 0;
+		e.reserved2 = 0;
+		e.reservedForVariations = 0;
+		e.numStrings = 2;
+		e.numSources = 0;
+		e.numSpecialHashes = 0;
+		e.numMetaEntries = 0;
+
+		// TODO: Does this need to be non-zero? Probably not, but monitor
+		// TODO: Padding? Probably not necessary?
+		e.generationTimeStamp = 0; 
+
+		/*
+		* Set values that vary based on resource type
+		*/
+		if (f.assetType == ModFileType::rs_streamfile) {
+			e.depIndices = 0;
+			e.version = 0;
+			e.flags = 0;
+			e.compMode = 0; 
+			e.variation = 0;
+			e.numDependencies = 0;
+			e.dataSize = f.dataLength;
+			e.uncompressedSize = f.dataLength;
+			e.dataCheckSum = HashLib::ResourceMurmurHash(std::string_view(static_cast<char*>(f.dataBuffer), f.dataLength));
+			e.defaultHash = e.dataCheckSum;
+
+			e.dataOffset = runningDataOffset;
+			runningDataOffset += e.dataSize;
+
+			// TODO: There's a fair bit of padding between each resource data block.
+			// At a minimum, a data block has 8-byte alignment. It's unknown what the implications of ignoring
+			// these practices are
+			runningDataOffset += 8 - runningDataOffset % 8;
+		}
+		else {
+			std::cout << "\nERROR: Unsupported resource type made it into build";
+			return;
+		}
+	}
+
+	AuditData dummy;
+	Audit_ResourceArchive(archive, dummy);
+
+	/*
+	* Write the archive
+	*/
+	#define rc(PARM) reinterpret_cast<char*>(PARM)
+
+	std::ofstream writer(outputdir / archivename, std::ios_base::binary);
+	writer.write(rc(&archive.header), sizeof(ResourceHeader));
+	writer.write(rc(archive.entries), sizeof(ResourceEntry) * h.numResources);
+
+	// String Chunk
+	uint64_t blobSize = h.stringTableSize - sizeof(uint64_t) - sizeof(uint64_t) * archive.stringChunk.numStrings - archive.stringChunk.paddingCount;
+	writer.write(rc(&archive.stringChunk.numStrings), sizeof(uint64_t));
+	writer.write(rc(archive.stringChunk.offsets), archive.stringChunk.numStrings * sizeof(uint64_t));
+	writer.write(archive.stringChunk.dataBlock, blobSize);
+	for(uint64_t i = 0; i < archive.stringChunk.paddingCount; i++)
+		writer.put('\0');
+
+	// Dependencies
+	writer.write(rc(archive.dependencies), h.numDependencies * sizeof(ResourceDependency));
+	writer.write(rc(archive.dependencyIndex), h.numDepIndices * sizeof(uint32_t));
+	writer.write(rc(archive.stringIndex), h.numStringIndices * sizeof(uint64_t));
+
+	// IDCL
+	writer.write("IDCL", 4);
+	for(int i = 0; i < archive.idclSize - 4; i++);
+		writer.put('\0');
+
+	// Write data chunks
+	for (size_t i = 0; i < mod.modFiles.size(); i++) {
+		ResourceEntry& e = archive.entries[i];
+		const ModFile& f = mod.modFiles[i];
+
+		writer.seekp(e.dataOffset, std::ios_base::beg);
+		writer.write(rc(f.dataBuffer), f.dataLength);
+	}
+	writer.close();
 
 }
 
@@ -745,15 +996,22 @@ void ModLoader(fspath gamedir, fspath outputdir) {
 int main(int argc, char* argv[]) {
 	#ifdef DOOMETERNAL
 	fspath gamedir = "D:/Steam/steamapps/common/DOOMEternal";
-	fspath outputdir = "../input/eternal"
+	fspath outputdir = "../input/eternal";
 	#else
 	fspath gamedir = "D:/Steam/steamapps/common/DOOMTheDarkAges";
 	fspath outputdir = "../input/darkages";
 	#endif
 
-	ModDef mod;
-	ModReader::ReadZipMod(mod, "../input/testzip.zip");
-	//Test_DumpManifests(gamedir, outputdir);
+	fspath modspath = gamedir / "mods";
+	fspath basepath = gamedir / "base";
+
+	//ModDef mod;
+	//ModReader::ReadZipMod(mod, "../input/ziptest/testzip.zip");
+	//BuildArchive(mod, gamedir, outputdir, "testarchive.resources");
+	//ModDef_Free(mod);
+
+
+	Test_DumpManifests(gamedir, outputdir);
 	//Test_DumpAllHeaders();
 	//Test_DumpPriorityManifest();
 	//Test_DumpConsolidatedFiles(gamedir, outputdir);
