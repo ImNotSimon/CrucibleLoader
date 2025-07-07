@@ -78,7 +78,7 @@ class EntityParser {
 	}
 
 	void WriteToFile(const std::string& filepath, bool compress) {
-		lastUncompressedSize = root.writeToFile(filepath, lastUncompressedSize + 10000, compress, true);
+		lastUncompressedSize = root.writeToFile(filepath, lastUncompressedSize + 10000, compress, false);
 		fileUpToDate = true;
 	}
 

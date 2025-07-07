@@ -5,6 +5,8 @@
 struct ModDef;
 struct ModFile;
 
+typedef std::filesystem::path fspath;
+
 enum class ModFileType : uint8_t {
 	rs_streamfile = 0,
 	entityDef = 1
@@ -38,5 +40,6 @@ inline void ModDef_Free(ModDef& mod) {
 
 namespace ModReader {
 	
-	void ReadZipMod(ModDef& readto, const std::filesystem::path& zipPath);
+	void ReadLooseMod(ModDef& readto, const fspath& tempzippath, const std::vector<fspath>& pathlist, const int loaderVersion);
+	void ReadZipMod(ModDef& readto, const fspath& zipPath, const int loaderVersion);
 }

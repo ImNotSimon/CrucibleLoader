@@ -3,9 +3,10 @@
 #include "entityslayer\EntityParser.h"
 #include <unordered_map>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 
-#define CFG_PATH "darkagemod.txt"
+#define CFG_PATH "darkagesmod.txt"
 #define CFG_REQUIREDVERSION "requiredVersion"
 #define CFG_LOADPRIORITY "loadPriority"
 #define CFG_ALIASES "aliasing"
@@ -77,7 +78,61 @@ void ReadConfigData(configData_t& cfg, mz_zip_archive* zptr)
 	//}
 }
 
-void ModReader::ReadZipMod(ModDef& mod, const std::filesystem::path& zipPath)
+/*
+* The strategy: zip loose mod files into a zip file, and then re-read that zip.
+* 
+* Why do things in such an inefficient manner? Because the alternative is to maintain two large
+* codepaths that must behave exactly the same while using two completely different IO interfaces.
+* It's far less of a headache to merge the rarely-used codepath into the commonly used one.
+*/
+void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const std::vector<fspath>& pathlist, const int loaderVersion)
+{
+	if(pathlist.empty())
+		return;
+	std::cout << "Zipping Loose Mod Files\n";
+
+	size_t substringIndex = tempzippath.parent_path().string().size() + 1; // + 1 Accounts for the backslash
+
+	// Initialize the zip data
+	mz_zip_archive zipfile;
+	mz_zip_archive* zptr = &zipfile;
+	mz_zip_zero_struct(zptr);
+	mz_zip_writer_init_heap(zptr, 4096, 4096);
+
+	// Read files from disk into the zip data
+	for (const fspath& fp : pathlist) {
+		std::string zippedName = fp.string().substr(substringIndex);
+
+		bool result = mz_zip_writer_add_file(zptr, zippedName.c_str(), fp.string().c_str(), "", 0, MZ_DEFAULT_COMPRESSION);
+		if (!result)
+			std::cout << "ERROR: Failed to add file to zip\n";
+	}
+
+	// Get the finished zip data
+	size_t bufferused = 0;
+	void* buffer = nullptr;
+	bool finalize = mz_zip_writer_finalize_heap_archive(zptr, &buffer, &bufferused);
+	if (!finalize) {
+		std::cout << "ERROR: Failed to finalize zip archive\n";
+	}
+
+	// Write the zip data
+	std::ofstream outzip(tempzippath, std::ios_base::binary);
+	outzip.write((char*)buffer, bufferused);
+	outzip.close();
+
+	// Clean up heap data
+	mz_zip_writer_end(zptr);
+	delete[] buffer;
+	std::cout << "Finished zipping loose mod files\n";
+	
+	// Read the zip to a mod struct
+	ReadZipMod(readto, tempzippath, loaderVersion);
+	// todo: remove temporary zip file afterwards
+	// todo: mz_zip_reader_init_mem
+}
+
+void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, const int loaderVersion)
 {
 	std::cout << "\nReading " << zipPath.filename();
 
@@ -98,6 +153,15 @@ void ModReader::ReadZipMod(ModDef& mod, const std::filesystem::path& zipPath)
 	ReadConfigData(cfg, zptr);
 	mod.loadPriority = cfg.loadpriority;
 	mod.modName = zipPath.stem().string();
+
+	/*
+	* Check if version requirement is met. If it isn't, skip reading the mod files
+	*/
+	if (loaderVersion < cfg.requiredversion) {
+		std::cout << "\nERROR: Mod requires Mod Loader Version " << cfg.requiredversion << " or greater. (Your version is " << loaderVersion << ")\n";
+		mz_zip_reader_end(zptr);
+		return;
+	}
 
 
 	/*
@@ -222,6 +286,6 @@ void ModReader::ReadZipMod(ModDef& mod, const std::filesystem::path& zipPath)
 		mod.modFiles.push_back(modfile);
 	}
 
-
+	mz_zip_reader_end(zptr);
 	delete[] nameBuffer;
 }

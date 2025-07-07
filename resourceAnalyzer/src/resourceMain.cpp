@@ -781,7 +781,7 @@ void Test_DumpManifests(fspath installDir, fspath outputDir) {
 const char* StringTableStart[] = {"rs_streamfile", "entityDef"};
 
 
-void BuildArchive(const ModDef& mod, fspath gamedir, fspath outputdir, fspath archivename) {
+void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchivepath) {
 	ResourceArchive archive;
 	ResourceHeader& h = archive.header;
 	
@@ -798,7 +798,7 @@ void BuildArchive(const ModDef& mod, fspath gamedir, fspath outputdir, fspath ar
 	h.numMetaEntries = 0;
 	h.metaEntriesSize = 0;
 	h.resourceEntriesOffset = sizeof(ResourceHeader);
-	h.numResources = static_cast<uint32_t>(mod.modFiles.size());
+	h.numResources = static_cast<uint32_t>(modfiles.size());
 	
 
 	/*
@@ -806,7 +806,7 @@ void BuildArchive(const ModDef& mod, fspath gamedir, fspath outputdir, fspath ar
 	*/
 	{
 		h.stringTableOffset = h.resourceEntriesOffset + h.numResources * sizeof(ResourceEntry);
-		archive.stringChunk.numStrings = sizeof(StringTableStart) / sizeof(StringTableStart[0]) + mod.modFiles.size();
+		archive.stringChunk.numStrings = sizeof(StringTableStart) / sizeof(StringTableStart[0]) + modfiles.size();
 		archive.stringChunk.offsets = new uint64_t[archive.stringChunk.numStrings];
 		h.stringTableSize = sizeof(uint64_t) // String Count Variable
 			+ archive.stringChunk.numStrings * sizeof(uint64_t); // Offsets Section (8 bytes per string)
@@ -816,7 +816,7 @@ void BuildArchive(const ModDef& mod, fspath gamedir, fspath outputdir, fspath ar
 		* to the final data buffer when finished
 		*/
 		std::string stringblob;
-		stringblob.reserve(mod.modFiles.size() * 75);
+		stringblob.reserve(modfiles.size() * 75);
 		uint64_t runningIndex = 0, runningOffset = 0;
 
 		for(int i = 0; i < sizeof(StringTableStart) / sizeof(StringTableStart[0]); i++) {
@@ -829,11 +829,11 @@ void BuildArchive(const ModDef& mod, fspath gamedir, fspath outputdir, fspath ar
 			stringblob.append(current, len);
 			stringblob.push_back('\0');
 		}
-		for(const ModFile& f : mod.modFiles) {
+		for(const ModFile* f : modfiles) {
 			archive.stringChunk.offsets[runningIndex++] = runningOffset;
-			runningOffset += f.assetPath.length() + 1;
+			runningOffset += f->assetPath.length() + 1;
 
-			stringblob.append(f.assetPath);
+			stringblob.append(f->assetPath);
 			stringblob.push_back('\0');
 		}
 		assert(runningOffset == stringblob.length());
@@ -854,12 +854,12 @@ void BuildArchive(const ModDef& mod, fspath gamedir, fspath outputdir, fspath ar
 	* Build String Indices
 	*/
 	{
-		h.numStringIndices = mod.modFiles.size() * 2;
+		h.numStringIndices = modfiles.size() * 2;
 		archive.stringIndex = new uint64_t[h.numStringIndices];
 
 		uint64_t* ptr = archive.stringIndex;
-		for (uint64_t i = 0; i < mod.modFiles.size(); i++) {
-			const ModFile& f = mod.modFiles[i];
+		for (uint64_t i = 0; i < modfiles.size(); i++) {
+			const ModFile& f = *modfiles[i];
 			*ptr = static_cast<uint64_t>(f.assetType);
 			*(ptr + 1) = i + sizeof(StringTableStart) / sizeof(StringTableStart[0]);
 			ptr += 2;
@@ -894,11 +894,11 @@ void BuildArchive(const ModDef& mod, fspath gamedir, fspath outputdir, fspath ar
 	/*
 	* Build the resource entries
 	*/
-	archive.entries = new ResourceEntry[mod.modFiles.size()];
+	archive.entries = new ResourceEntry[modfiles.size()];
 	uint64_t runningDataOffset = h.dataOffset;
-	for(size_t i = 0; i < mod.modFiles.size(); i++) {
+	for(size_t i = 0; i < modfiles.size(); i++) {
 		ResourceEntry& e = archive.entries[i];
-		const ModFile& f = mod.modFiles[i];
+		const ModFile& f = *modfiles[i];
 
 		/*
 		* Set universal values
@@ -958,7 +958,7 @@ void BuildArchive(const ModDef& mod, fspath gamedir, fspath outputdir, fspath ar
 	*/
 	#define rc(PARM) reinterpret_cast<char*>(PARM)
 
-	std::ofstream writer(outputdir / archivename, std::ios_base::binary);
+	std::ofstream writer(outarchivepath, std::ios_base::binary);
 	writer.write(rc(&archive.header), sizeof(ResourceHeader));
 	writer.write(rc(archive.entries), sizeof(ResourceEntry) * h.numResources);
 
@@ -981,15 +981,269 @@ void BuildArchive(const ModDef& mod, fspath gamedir, fspath outputdir, fspath ar
 		writer.put('\0');
 
 	// Write data chunks
-	for (size_t i = 0; i < mod.modFiles.size(); i++) {
+	for (size_t i = 0; i < modfiles.size(); i++) {
 		ResourceEntry& e = archive.entries[i];
-		const ModFile& f = mod.modFiles[i];
+		const ModFile& f = *modfiles[i];
 
 		writer.seekp(e.dataOffset, std::ios_base::beg);
 		writer.write(rc(f.dataBuffer), f.dataLength);
 	}
 	writer.close();
 
+}
+
+void StringPackageMapSpec(const fspath pmspath) {
+	EntityParser entparser(pmspath.string(), ParsingMode::JSON);
+	EntNode& jsonroot = *entparser.getRoot()->ChildAt(0);
+	
+	std::vector<std::string_view> filenames;
+	EntNode& filelist = jsonroot["\"files\""];
+	for(int i = 0; i < filelist.getChildCount(); i++) {
+		filenames.push_back(filelist.ChildAt(i)->ChildAt(0)->getValueUQ());
+		//std::cout << filenames.back() << "\n";
+	}
+
+	std::vector<std::string_view> mapnames;
+	EntNode& maplist = jsonroot["\"maps\""];
+	for(int i = 0; i < maplist.getChildCount(); i++) {
+		mapnames.push_back(maplist.ChildAt(i)->ChildAt(0)->getValueUQ());
+	}
+
+	std::vector<std::vector<int>> filemapping;
+	filemapping.resize(mapnames.size());
+
+	EntNode& mapfilerefs = jsonroot["\"mapFileRefs\""];
+	for(int i = 0; i < mapfilerefs.getChildCount(); i++) {
+		int fileindex = -1, mapindex = -1;
+		mapfilerefs.ChildAt(i)->ChildAt(0)->ValueInt(fileindex, -9999, 9999);
+		mapfilerefs.ChildAt(i)->ChildAt(1)->ValueInt(mapindex, -9999, 9999);
+
+		assert(fileindex != -1);
+		assert(mapindex != -1);
+
+		filemapping[mapindex].push_back(fileindex);
+	}
+
+
+	for(size_t i = 0; i < filemapping.size(); i++) {
+		std::cout << "\n" << mapnames[i] << "\n";
+
+		for(int fileindex : filemapping[i]) {
+			std::cout << "-" << filenames[fileindex] << "\n";
+		}
+
+	}
+}
+
+// TODO: Will need to revisit this upon adding more advanced features
+// and allow for packagemapspec manipulation
+void ModPackageMapSpec(const fspath pmspath, const fspath newarchivepath)
+{
+	EntityParser entparser(pmspath.string(), ParsingMode::JSON);
+	EntNode& jsonroot = *entparser.getRoot()->ChildAt(0);
+
+	// Get the relative path appropriate for the packagemapspec
+	size_t substringIndex = pmspath.parent_path().string().size() + 1;
+	std::string archrelativepath = newarchivepath.string().substr(substringIndex);
+	for(char& c : archrelativepath) {
+		if(c == '\\') c = '/';
+	}
+
+	//std::cout << archrelativepath;
+
+	// Get relevant nodes
+	EntNode& filelist = jsonroot["\"files\""];
+	EntNode& mapfilerefs = jsonroot["\"mapFileRefs\""];
+
+	// Insert the file name into the packagemapspec
+	char buffer[512];
+	snprintf(buffer, 512, R"({ "name": "%s" })", archrelativepath.c_str());
+	entparser.EditTree(buffer, &filelist, filelist.getChildCount(), 0, 0, 0);
+
+	snprintf(buffer, 512, R"({ "file": %s, "map": 0 })", std::to_string(filelist.getChildCount() - 1).c_str());
+	entparser.EditTree(buffer, &mapfilerefs, 0, 0, 0, 0);
+
+	entparser.WriteToFile(pmspath.string(), 0);
+}
+
+void Test_Injector(const fspath gamedir) {
+	#define INJECTOR_VERSION 1
+
+	fspath modsdir = gamedir / "mods";
+	fspath loosezippath = modsdir / "TEMPORARY_unzipped_modfiles.zip";
+	fspath basedir = gamedir / "base";
+	fspath outdir = basedir / "modarchives";
+	fspath outarchivepath = outdir / "common_mod.resources";
+	fspath pmspath = basedir / "packagemapspec.json";
+	fspath pmsbackup = pmspath;
+	pmsbackup += ".backup";
+
+	std::vector<fspath> loosemodpaths;
+	std::vector<fspath> zipmodpaths;
+	loosemodpaths.reserve(20);
+	zipmodpaths.reserve(20);
+
+
+	/*
+	* CREATE / RESTORE BACKUPS; CLEANUP PREVIOUS INJECTION FILES
+	*/
+	{
+		using namespace std::filesystem;
+
+		std::error_code lastCode;
+		std::cout << "Managing backups and cleaning up previous injection files.\n";
+
+		// Ensure packagemapspec.json exists
+		if (!exists(pmspath)) {
+			std::cout << "ERROR: Could not find " << absolute(pmspath) << "\n";
+			return;
+		}
+
+		// Backup packagemapspec.json - or restore it if backup already exists
+		if(!exists(pmsbackup)) {
+			copy_file(pmspath, pmsbackup, copy_options::none, lastCode);
+		}
+		else {
+			copy_file(pmsbackup, pmspath, copy_options::overwrite_existing, lastCode);
+		}
+
+		// Create input/output directories if they don't exist yet
+		if (!exists(modsdir))
+			create_directory(modsdir, lastCode);
+		if(!exists(outdir))
+			create_directory(outdir, lastCode);
+
+		// Delete archives created from previous injections
+		std::vector<fspath> filesToDelete;
+		filesToDelete.reserve(10);
+		for (const directory_entry& dirEntry : directory_iterator(outdir)) {
+			if(dirEntry.is_directory())
+				continue;
+
+			if(dirEntry.path().extension() == ".resources") {
+				filesToDelete.push_back(dirEntry.path());
+			}
+		}
+		for (const fspath& fp : filesToDelete) {
+			remove(fp, lastCode);
+		}
+
+		// Ensure the temporary loose mod zip doesn't exist
+		if (exists(loosezippath)) {
+			remove(loosezippath, lastCode);
+		}
+	}
+
+	/*
+	* GATHER MOD FILE PATHS
+	*/
+	{
+		using namespace std::filesystem;
+
+		// Build list of zip mod files
+		for (const directory_entry& dirEntry : directory_iterator(modsdir)) {
+			if(dirEntry.is_directory())
+				continue;
+
+			if(dirEntry.path().extension() == ".zip")
+				zipmodpaths.push_back(dirEntry.path());
+		}
+
+		// Build list of loose mod files
+		for (const directory_entry& dirEntry : recursive_directory_iterator(modsdir)) {
+			if (dirEntry.is_directory())
+				continue;
+
+			if (dirEntry.path().extension() != ".zip")
+				loosemodpaths.push_back(dirEntry.path());
+		}
+
+		std::cout << "\nZipped Paths\n";
+		for(const fspath& f : zipmodpaths)
+			std::cout << f << "\n";
+		std::cout << "\nLoose Paths\n";
+		for(const fspath& f : loosemodpaths)
+			std::cout << f << "\n";
+	}
+	
+
+	/*
+	* READ MOD DATA
+	*/
+
+	std::cout << "\n\nReading Mods:\n";
+
+	int totalmods = zipmodpaths.size() + 1; // + 1 for the loose mod
+	ModDef* realmods = new ModDef[totalmods];
+
+	realmods[0].loadPriority = -999;
+	ModReader::ReadLooseMod(realmods[0], loosezippath, loosemodpaths, INJECTOR_VERSION);
+	for (int i = 1; i < totalmods; i++) {
+		ModReader::ReadZipMod(realmods[i], zipmodpaths[i - 1], INJECTOR_VERSION);
+	}
+
+	/*
+	* BUILD THE SUPER MOD - This is a consolidated "mod" containing the highest
+	* priority version of every mod file. All mod file conflicts will be resolved here
+	* (conflicts from different mods, or from the same mods - in the case of bad aliasing setups)
+	*/
+	std::cout << "\n\nChecking for Conflicts:\n";
+
+	std::vector<const ModFile*> supermod;
+	{
+		// TODO: May need to make this map<ResourceType, map<string, ModFile*>> when
+		// we support more than just rs_streamfiles
+		std::unordered_map<std::string, const ModFile*> priorityAssets;
+
+		for(int i = 0; i < totalmods; i++) {
+			const ModDef& current = realmods[i];
+
+			for(const ModFile& file : current.modFiles) {
+
+				auto iter = priorityAssets.find(file.assetPath);
+				if(iter == priorityAssets.end()) {
+					priorityAssets.emplace(file.assetPath, &file);
+				} 
+				else {
+					bool replaceMapping = current.loadPriority < iter->second->parentMod->loadPriority;
+
+					std::cout << "CONFLICT FOUND: " << file.assetPath
+						<< "\n(A):" << current.modName << " - " << file.realPath
+						<< "\n(B):" << iter->second->parentMod->modName << " - " << iter->second->realPath
+						<< "\nWinner: " << (replaceMapping ? "(A)\n" : "(B)\n");
+
+					if(replaceMapping) {
+						iter->second = &file;
+					}
+				}
+			}
+		}
+
+		supermod.reserve(priorityAssets.size());
+		for (const auto& pair : priorityAssets) {
+			supermod.push_back(pair.second);
+		}
+	}
+
+	/*
+	* BUILD THE RESOURCE ARCHIVES
+	*/
+
+	if (supermod.size() > 0) {
+		BuildArchive(supermod, outarchivepath);
+		ModPackageMapSpec(pmspath, outarchivepath);
+	}
+	else {
+		std::cout << "\n\nNo mods will be loaded. All previously loaded mods are removed.\n";
+	}
+
+	/*
+	* DEALLOCATE EVERYTHING
+	*/
+	for(int i = 0; i < totalmods; i++) {
+		ModDef_Free(realmods[i]);
+	}
+	delete[] realmods;
 }
 
 
@@ -1011,7 +1265,8 @@ int main(int argc, char* argv[]) {
 	//ModDef_Free(mod);
 
 
-	Test_DumpManifests(gamedir, outputdir);
+	Test_Injector("../input/darkages/injectortest");
+	//Test_DumpManifests(gamedir, outputdir);
 	//Test_DumpAllHeaders();
 	//Test_DumpPriorityManifest();
 	//Test_DumpConsolidatedFiles(gamedir, outputdir);
