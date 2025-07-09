@@ -32,6 +32,10 @@ OodLZ_CompressFunc* OodLZ_Compress;
 OodLZ_DecompressFunc* OodLZ_Decompress;
 bool initializedSuccessfully = false;
 
+bool Oodle::IsInitialized() {
+    return initializedSuccessfully;
+}
+
 bool Oodle::init()
 {
     initializedSuccessfully = false;

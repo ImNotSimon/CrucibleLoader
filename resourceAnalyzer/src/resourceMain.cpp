@@ -1,9 +1,10 @@
 #include "io/BinaryReader.h"
 #include "io/BinaryWriter.h"
 #include "hash/HashLib.h"
-#include "entityslayer/EntityParser.h"
 #include "ResourceStructs.h"
 #include "ModReader.h"
+#include "entityslayer/Oodle.h"
+#include "PackageMapSpec.h"
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -44,11 +45,18 @@ void Get_EntryStrings(const ResourceArchive& r, const ResourceEntry& e, const ch
 }
 
 void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r) {
-
+	if (!Oodle::IsInitialized()) {
+		std::cout << "Oodle is not initialized! Aborting file extraction\n";
+		return;
+	}
 	int fileCount = 0;
+
+	char* decompBlob = nullptr;
+	size_t decompSize = 0;
 
 	std::filesystem::path declDir = outputDir / "rs_streamfile";
 	std::filesystem::path entityDir = outputDir / "entityDef";
+	std::filesystem::path fileResourceDir = outputDir / "file";
 
 	for (uint64_t i = 0; i < r.header.numResources; i++) {
 		ResourceEntry& e = r.entries[i];
@@ -64,6 +72,9 @@ void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r) {
 		}
 		else if (strcmp(typeString, "entityDef") == 0) {
 			fileDir = entityDir;
+		}
+		else if(strcmp(typeString, "file") == 0) {
+			fileDir = fileResourceDir;
 		}
 		else {
 			continue;
@@ -86,13 +97,38 @@ void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r) {
 		}
 
 		char* dataLocation = r.bufferData + (e.dataOffset - r.header.dataOffset);
-
 		std::ofstream outputFile(fileDir / archivePath.filename(), std::ios_base::binary);
-		outputFile.write(dataLocation, e.dataSize);
+
+		switch(e.compMode) {
+			case 0: // No compression
+			outputFile.write(dataLocation, e.dataSize);
+			break;
+
+			case 2:
+			{
+				if(decompSize < e.uncompressedSize) {
+					delete[] decompBlob;
+					decompBlob = new char[e.uncompressedSize];
+					decompSize = e.uncompressedSize;
+				}
+				bool success = Oodle::DecompressBuffer(dataLocation, e.dataSize, decompBlob, e.uncompressedSize);
+				if(!success)
+					std::cout << "Oodle Decompression Failed for " << (fileDir / archivePath.filename()) << "\n";
+				outputFile.write(decompBlob, e.uncompressedSize);
+			}
+			break;
+
+			default:
+			assert(0);
+			break;
+		}
+
+
 		outputFile.close();
 		fileCount++;
 	}
 
+	delete[] decompBlob;
 	std::cout << "Dumped " << fileCount << " files from archive\n";
 }
 
@@ -103,13 +139,11 @@ void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r) {
 void Audit_ResourceHeader(const ResourceHeader& h)
 {
 	assert(h.magic[0] == 'I' && h.magic[1] == 'D' && h.magic[2] == 'C' && h.magic[3] == 'L');
+	assert(h.version == ARCHIVE_VERSION);
 	
 	#ifdef DOOMETERNAL
-	assert(h.version == 12);
 	assert(h.unknown == 0);
 	assert(h.metaOffset == h.resourceDepsOffset + h.numDependencies * sizeof(ResourceDependency) + h.numDepIndices * sizeof(uint32_t) + h.numStringIndices * sizeof(uint64_t));
-	#else
-	assert(h.version == 13);
 	#endif
 
 	// Constants
@@ -440,20 +474,14 @@ void String_ResourceArchive(const ResourceArchive& r, std::string& writeTo) {
 */
 
 
-void Test_DumpAllHeaders() {
+void Test_DumpAllHeaders(const fspath gamedir, const fspath outdir) {
 
-	#ifdef DOOMETERNAL
-	const char* dirGame = "D:/Steam/steamapps/common/DOOMEternal/";
-	const char* outputPath = "../input/archiveHeaders_Eternal.txt";
-	#else
-	const char* dirGame = "D:/Steam/steamapps/common/DOOMTheDarkAges/";
-	const char* outputPath = "../input/archiveHeaders_DarkAges.txt";
-	#endif
+	const fspath outputPath = outdir / "archiveHeaders_DarkAges.txt";
 	
 	std::string text;
 
 	text.append("Headers = {\n");
-	for (const auto& entry : std::filesystem::recursive_directory_iterator(dirGame)) {
+	for (const auto& entry : std::filesystem::recursive_directory_iterator(gamedir)) {
 
 		if (entry.is_directory())
 			continue;
@@ -479,49 +507,54 @@ void Test_DumpAllHeaders() {
 	output.close();
 }
 
-struct PriorityInfo {
-	std::string name;
-	int priority;
-};
+void Test_DumpContainerMaskHashes(const fspath gamedir, const fspath outdir) {
+	const fspath outpath = outdir / "container_mask_hashes.txt";
+	std::string text;
 
-std::vector<PriorityInfo> Test_GetArchiveList(const fspath& installFolder)
-{
-	fspath pathMapSpec = installFolder / "base/packagemapspec.json";
-	if(!std::filesystem::exists(pathMapSpec))
-		return {};
+	using namespace std::filesystem;
+	for(const directory_entry& entry : recursive_directory_iterator(gamedir)) {
+		if(entry.is_directory())
+			continue;
+		if(entry.path().extension() != ".resources")
+			continue;
 
-	std::vector<PriorityInfo> packages;
-	try {
-		EntityParser parser(pathMapSpec.string(), ParsingMode::JSON);
+		std::string filename = entry.path().filename().string();
 
-		EntNode* root = parser.getRoot()->ChildAt(0);
-		EntNode& files = (*root)["\"files\""];
 
-		// Get all resource archive names and their priorities
-		for (int i = 0; i < files.getChildCount(); i++) {
-			EntNode& name = (*files.ChildAt(i))["\"name\""];
+		ResourceArchive archive;
+		const ResourceHeader& h = archive.header;
+		Read_ResourceArchive(archive, entry.path().string(), RF_HeaderOnly);
 
-			assert(&name != EntNode::SEARCH_404);
+		size_t start = sizeof(ResourceHeader);
+		size_t end = h.resourceDepsOffset + h.numDependencies * sizeof(ResourceDependency) + h.numDepIndices * sizeof(uint32_t) + h.numStringIndices * sizeof(uint64_t) + 4;
+		size_t len = end - start;
+		char* buffer = new char[len];
 
-			std::string_view nameString = name.getValueUQ();
+		std::ifstream reader(entry.path(), std::ios_base::binary);
+		reader.seekg(sizeof(ResourceHeader), std::ios_base::beg);
 
-			// All of this...because the C++ 17 STL doesn't have EndsWith
-			std::string_view extString = ".resources";
-			size_t extIndex = nameString.rfind(extString);
-			if (extIndex != std::string_view::npos && extIndex + extString.length() == nameString.length())
-			{
-				//printf("%.*s\n", (int)nameString.length(), nameString.data());
-				packages.push_back({ std::string(nameString), i });
-			}
-		}
+		reader.read(buffer, len);
+
+		assert(buffer[len - 1] == 'L');
+
+		uint64_t hash = HashLib::FarmHash64(buffer, len);
+		
+
+
+		text.push_back('"');
+		text.append(filename);
+		text.append("\" = ");
+		text.append(std::to_string(hash));
+		text.append("\n");
+
+		delete[] buffer;
 	}
-	catch (std::exception e) {
-		return {};
-	}
 
-	return packages;
+	std::ofstream outwriter(outpath, std::ios_base::binary);
+	outwriter << text;
+	outwriter.close();
+
 }
-
 
 /*
 * DUMP PRIORITY MANIFEST
@@ -535,27 +568,27 @@ void Test_DumpPriorityManifest()
 	};
 
 	// STL Container happy fun time
-	std::vector<PriorityInfo> packages = Test_GetArchiveList("D:/steam/steamapps/common/DOOMTheDarkAges");
+	std::vector<std::string> packages = PackageMapSpec::GetPrioritizedArchiveList("D:/steam/steamapps/common/DOOMTheDarkAges");
 	std::unordered_map<std::string, std::vector<PackageManifest>> groupedPackages; // First in vector = higher priority
 	std::vector<std::string> packageNameList;
 
 	// Group patches by their "true" name
-	for (PriorityInfo& p : packages) {
-		int lastSlash = (int)p.name.rfind('/'); // Will be index of final slash, or -1
-		int period = (int)p.name.rfind('.');
+	for (const std::string& p : packages) {
+		int lastSlash = (int)p.rfind('/'); // Will be index of final slash, or -1
+		int period = (int)p.rfind('.');
 		assert(period > lastSlash);
 
-		int patchIndex = (int)p.name.find("_patch", lastSlash + 1);
-		std::string fullName = p.name.substr(lastSlash + 1, period - lastSlash - 1);
+		int patchIndex = (int)p.find("_patch", lastSlash + 1);
+		std::string fullName = p.substr(lastSlash + 1, period - lastSlash - 1);
 		std::string patchlessName;
 		if (patchIndex > -1) {
 			assert(patchIndex + 7 == period); // Length of _patch#
-			patchlessName = p.name.substr(lastSlash + 1, patchIndex - lastSlash - 1);
+			patchlessName = p.substr(lastSlash + 1, patchIndex - lastSlash - 1);
 		}
 		else {
-			patchlessName = p.name.substr(lastSlash + 1, period - lastSlash - 1);
+			patchlessName = p.substr(lastSlash + 1, period - lastSlash - 1);
 		}
-		groupedPackages[patchlessName].push_back({fullName, p.name});
+		groupedPackages[patchlessName].push_back({fullName, p});
 		packageNameList.push_back(fullName);
 	}
 
@@ -699,10 +732,15 @@ void Test_DumpPriorityManifest()
 void Test_DumpConsolidatedFiles(fspath installFolder, fspath outputFolder) {
 	std::cout << "Dark Ages consolidated resource extractor by FlavorfulGecko5\n";
 
+	if(!Oodle::init()) {
+		std::cout << "Failed to initialize Oodle Decompression Library! Terminating extraction process\n";
+		return;
+	}
+
 	// Setup Paths
 	outputFolder /= "geckoExporter";
 	fspath PathBase = installFolder / "base";
-	std::vector<PriorityInfo> packages = Test_GetArchiveList(installFolder);
+	std::vector<std::string> packages = PackageMapSpec::GetPrioritizedArchiveList(installFolder);
 
 	if (packages.empty()) {
 		std::cout << "FATAL ERROR: Could not find PackageMapSpec.json\n";
@@ -715,11 +753,12 @@ void Test_DumpConsolidatedFiles(fspath installFolder, fspath outputFolder) {
 	std::filesystem::create_directories(outputFolder);
 
 	for (int i = (int)packages.size() - 1; i > -1; i--) {
-
+		//if(packages[i].name != "meta.resources")
+		//	continue;
 		//if(i <= packages.size() - 2) // Remove me later
 		//	return;
 
-		std::filesystem::path resPath = PathBase / packages[i].name;
+		std::filesystem::path resPath = PathBase / packages[i];
 		std::cout << "Dumping: " << resPath.string() << "\n";
 
 		// Parse the archive
@@ -735,12 +774,12 @@ void Test_DumpConsolidatedFiles(fspath installFolder, fspath outputFolder) {
 * DUMPS MANIFEST FILES FOR ALL RESOURCE ARCHIVES IN THE GAME
 */
 void Test_DumpManifests(fspath installDir, fspath outputDir) {
-	std::vector<PriorityInfo> packages = Test_GetArchiveList(installDir);
+	std::vector<std::string> packages = PackageMapSpec::GetPrioritizedArchiveList(installDir);
 	AuditData audit;
 
 	for (int i = 0; i < packages.size(); i++) {
-		std::cout << packages[i].name << "\n";
-		fspath resourcePath = installDir / "base" / packages[i].name;
+		std::cout << packages[i] << "\n";
+		fspath resourcePath = installDir / "base" / packages[i];
 		fspath manifestPath = outputDir / "manifests" / resourcePath.stem();
 		manifestPath.concat(".txt");
 
@@ -789,7 +828,7 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 	* Header Constants
 	*/
 	h.magic[0] = 'I'; h.magic[1] = 'D'; h.magic[2] = 'C'; h.magic[3] = 'L';
-	h.version = 13;
+	h.version = ARCHIVE_VERSION;
 	h.flags = 0;
 	h.numSegments = 1;
 	h.segmentSize = 1099511627775UL;
@@ -808,9 +847,10 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 		h.stringTableOffset = h.resourceEntriesOffset + h.numResources * sizeof(ResourceEntry);
 		archive.stringChunk.numStrings = sizeof(StringTableStart) / sizeof(StringTableStart[0]) + modfiles.size();
 		archive.stringChunk.offsets = new uint64_t[archive.stringChunk.numStrings];
-		h.stringTableSize = sizeof(uint64_t) // String Count Variable
-			+ archive.stringChunk.numStrings * sizeof(uint64_t); // Offsets Section (8 bytes per string)
-
+		h.stringTableSize = static_cast<uint32_t> (
+			sizeof(uint64_t) // String Count Variable
+			+ archive.stringChunk.numStrings * sizeof(uint64_t) // Offsets Section (8 bytes per string)
+		);
 		/*
 		* For the sake of simplicity, we write the string blob to a resizeable array, then copy it over
 		* to the final data buffer when finished
@@ -838,9 +878,9 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 		}
 		assert(runningOffset == stringblob.length());
 		assert(runningIndex == archive.stringChunk.numStrings);
-		h.stringTableSize += runningOffset;
+		h.stringTableSize += static_cast<uint32_t>(runningOffset);
 		archive.stringChunk.paddingCount = h.stringTableSize % 8;
-		h.stringTableSize += 8 - archive.stringChunk.paddingCount;
+		h.stringTableSize += 8 - static_cast<uint32_t>(archive.stringChunk.paddingCount);
 
 		/*
 		* Copy over blob
@@ -854,7 +894,7 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 	* Build String Indices
 	*/
 	{
-		h.numStringIndices = modfiles.size() * 2;
+		h.numStringIndices = static_cast<uint32_t>(modfiles.size() * 2);
 		archive.stringIndex = new uint64_t[h.numStringIndices];
 
 		uint64_t* ptr = archive.stringIndex;
@@ -992,81 +1032,11 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 
 }
 
-void StringPackageMapSpec(const fspath pmspath) {
-	EntityParser entparser(pmspath.string(), ParsingMode::JSON);
-	EntNode& jsonroot = *entparser.getRoot()->ChildAt(0);
-	
-	std::vector<std::string_view> filenames;
-	EntNode& filelist = jsonroot["\"files\""];
-	for(int i = 0; i < filelist.getChildCount(); i++) {
-		filenames.push_back(filelist.ChildAt(i)->ChildAt(0)->getValueUQ());
-		//std::cout << filenames.back() << "\n";
-	}
+enum ArgFlags {
+	argflag_resetvanilla = 1 << 0
+};
 
-	std::vector<std::string_view> mapnames;
-	EntNode& maplist = jsonroot["\"maps\""];
-	for(int i = 0; i < maplist.getChildCount(); i++) {
-		mapnames.push_back(maplist.ChildAt(i)->ChildAt(0)->getValueUQ());
-	}
-
-	std::vector<std::vector<int>> filemapping;
-	filemapping.resize(mapnames.size());
-
-	EntNode& mapfilerefs = jsonroot["\"mapFileRefs\""];
-	for(int i = 0; i < mapfilerefs.getChildCount(); i++) {
-		int fileindex = -1, mapindex = -1;
-		mapfilerefs.ChildAt(i)->ChildAt(0)->ValueInt(fileindex, -9999, 9999);
-		mapfilerefs.ChildAt(i)->ChildAt(1)->ValueInt(mapindex, -9999, 9999);
-
-		assert(fileindex != -1);
-		assert(mapindex != -1);
-
-		filemapping[mapindex].push_back(fileindex);
-	}
-
-
-	for(size_t i = 0; i < filemapping.size(); i++) {
-		std::cout << "\n" << mapnames[i] << "\n";
-
-		for(int fileindex : filemapping[i]) {
-			std::cout << "-" << filenames[fileindex] << "\n";
-		}
-
-	}
-}
-
-// TODO: Will need to revisit this upon adding more advanced features
-// and allow for packagemapspec manipulation
-void ModPackageMapSpec(const fspath pmspath, const fspath newarchivepath)
-{
-	EntityParser entparser(pmspath.string(), ParsingMode::JSON);
-	EntNode& jsonroot = *entparser.getRoot()->ChildAt(0);
-
-	// Get the relative path appropriate for the packagemapspec
-	size_t substringIndex = pmspath.parent_path().string().size() + 1;
-	std::string archrelativepath = newarchivepath.string().substr(substringIndex);
-	for(char& c : archrelativepath) {
-		if(c == '\\') c = '/';
-	}
-
-	//std::cout << archrelativepath;
-
-	// Get relevant nodes
-	EntNode& filelist = jsonroot["\"files\""];
-	EntNode& mapfilerefs = jsonroot["\"mapFileRefs\""];
-
-	// Insert the file name into the packagemapspec
-	char buffer[512];
-	snprintf(buffer, 512, R"({ "name": "%s" })", archrelativepath.c_str());
-	entparser.EditTree(buffer, &filelist, filelist.getChildCount(), 0, 0, 0);
-
-	snprintf(buffer, 512, R"({ "file": %s, "map": 0 })", std::to_string(filelist.getChildCount() - 1).c_str());
-	entparser.EditTree(buffer, &mapfilerefs, 0, 0, 0, 0);
-
-	entparser.WriteToFile(pmspath.string(), 0);
-}
-
-void Test_Injector(const fspath gamedir) {
+void Test_Injector(const fspath gamedir, const int argflags) {
 	#define INJECTOR_VERSION 1
 
 	fspath modsdir = gamedir / "mods";
@@ -1134,6 +1104,11 @@ void Test_Injector(const fspath gamedir) {
 		}
 	}
 
+	if(argflags & argflag_resetvanilla) {
+		std::cout << "Uninstalled all mods\n";
+		return;
+	}
+
 	/*
 	* GATHER MOD FILE PATHS
 	*/
@@ -1173,7 +1148,7 @@ void Test_Injector(const fspath gamedir) {
 
 	std::cout << "\n\nReading Mods:\n";
 
-	int totalmods = zipmodpaths.size() + 1; // + 1 for the loose mod
+	int totalmods = static_cast<int>(zipmodpaths.size() + 1); // + 1 for the loose mod
 	ModDef* realmods = new ModDef[totalmods];
 
 	realmods[0].loadPriority = -999;
@@ -1231,7 +1206,7 @@ void Test_Injector(const fspath gamedir) {
 
 	if (supermod.size() > 0) {
 		BuildArchive(supermod, outarchivepath);
-		ModPackageMapSpec(pmspath, outarchivepath);
+		PackageMapSpec::InjectCommonArchive(gamedir, outarchivepath);
 	}
 	else {
 		std::cout << "\n\nNo mods will be loaded. All previously loaded mods are removed.\n";
@@ -1246,6 +1221,39 @@ void Test_Injector(const fspath gamedir) {
 	delete[] realmods;
 }
 
+void Test_ContainerMask() {
+	BinaryOpener opener("../input/container.mask");
+	assert(opener.Okay());
+	BinaryReader r = opener.ToReader();
+
+	uint32_t hashCount = 0;
+	assert(r.ReadLE(hashCount));
+
+	for(uint32_t i = 0; i < hashCount; i++) {
+		uint64_t hash;
+		uint32_t paddingCount;
+		const char* padding;
+
+		assert(r.ReadLE(hash));
+		assert(hash != -1);
+		assert(r.ReadLE(paddingCount));
+		assert(r.ReadBytes(padding, paddingCount * sizeof(uint64_t)));
+		std::cout << r.GetRemaining() << "\n";
+	}
+
+	assert(r.GetRemaining() == 0);
+}
+
+/*
+* Would need to:
+* - decrypt container mask
+* - Change data offset
+* - Change data size
+* - Change uncompressed size
+* - Change defaultHash and data Check Sum
+* - Change compMode to 0 (if we opt not to recompress it)
+*/
+
 
 int main(int argc, char* argv[]) {
 	#ifdef DOOMETERNAL
@@ -1256,18 +1264,16 @@ int main(int argc, char* argv[]) {
 	fspath outputdir = "../input/darkages";
 	#endif
 
-	fspath modspath = gamedir / "mods";
-	fspath basepath = gamedir / "base";
+	fspath testgamedir = "../input/darkages/injectortest";
 
-	//ModDef mod;
-	//ModReader::ReadZipMod(mod, "../input/ziptest/testzip.zip");
-	//BuildArchive(mod, gamedir, outputdir, "testarchive.resources");
-	//ModDef_Free(mod);
+	//Test_ContainerMask();
 
-
-	Test_Injector("../input/darkages/injectortest");
+	//Test_Injector("D:/Steam/steamapps/common/DOOMTheDarkAges", argflag_resetvanilla);
+	//Test_Injector("../input/darkages/injectortest");
+	
+	//Test_DumpContainerMaskHashes(gamedir, outputdir);
 	//Test_DumpManifests(gamedir, outputdir);
-	//Test_DumpAllHeaders();
+	//Test_DumpAllHeaders(gamedir, outputdir);
 	//Test_DumpPriorityManifest();
 	//Test_DumpConsolidatedFiles(gamedir, outputdir);
 	//Test_DumpCommonManifest();

@@ -152,6 +152,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\ModReader.cpp" />
+    <ClCompile Include="src\PackageMapSpec.cpp" />
     <ClCompile Include="src\resourceMain.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -161,6 +162,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\ModReader.h" />
+    <ClInclude Include="src\PackageMapSpec.h" />
     <ClInclude Include="src\ResourceStructs.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

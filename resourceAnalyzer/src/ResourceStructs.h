@@ -2,6 +2,12 @@
 
 //#define DOOMETERNAL
 
+#ifdef DOOMETERNAL
+#define ARCHIVE_VERSION 12
+#else
+#define ARCHIVE_VERSION 13
+#endif
+
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned uint32_t;
