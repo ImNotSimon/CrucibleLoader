@@ -507,6 +507,28 @@ void Test_DumpAllHeaders(const fspath gamedir, const fspath outdir) {
 	output.close();
 }
 
+uint64_t GetContainerMaskHash(const fspath archivepath) {
+	std::ifstream input(archivepath, std::ios_base::binary);
+
+	ResourceHeader h;
+	input.read(reinterpret_cast<char*>(&h), sizeof(ResourceHeader));
+
+	size_t start = sizeof(ResourceHeader);
+	size_t end = h.resourceDepsOffset + h.numDependencies * sizeof(ResourceDependency) + h.numDepIndices * sizeof(uint32_t) + h.numStringIndices * sizeof(uint64_t) + 4;
+	size_t len = end - start;
+	char* buffer = new char[len];
+
+	input.read(buffer, len);
+	assert(buffer[len - 1] == 'L');
+	assert(buffer[len - 2] == 'C');
+	assert(buffer[len - 3] == 'D');
+	assert(buffer[len - 4] == 'I');
+
+	uint64_t hash = HashLib::FarmHash64(buffer, len);
+	delete[] buffer;
+	return hash;
+}
+
 void Test_DumpContainerMaskHashes(const fspath gamedir, const fspath outdir) {
 	const fspath outpath = outdir / "container_mask_hashes.txt";
 	std::string text;
@@ -520,40 +542,18 @@ void Test_DumpContainerMaskHashes(const fspath gamedir, const fspath outdir) {
 
 		std::string filename = entry.path().filename().string();
 
-
-		ResourceArchive archive;
-		const ResourceHeader& h = archive.header;
-		Read_ResourceArchive(archive, entry.path().string(), RF_HeaderOnly);
-
-		size_t start = sizeof(ResourceHeader);
-		size_t end = h.resourceDepsOffset + h.numDependencies * sizeof(ResourceDependency) + h.numDepIndices * sizeof(uint32_t) + h.numStringIndices * sizeof(uint64_t) + 4;
-		size_t len = end - start;
-		char* buffer = new char[len];
-
-		std::ifstream reader(entry.path(), std::ios_base::binary);
-		reader.seekg(sizeof(ResourceHeader), std::ios_base::beg);
-
-		reader.read(buffer, len);
-
-		assert(buffer[len - 1] == 'L');
-
-		uint64_t hash = HashLib::FarmHash64(buffer, len);
-		
-
+		uint64_t hash = GetContainerMaskHash(entry.path());
 
 		text.push_back('"');
 		text.append(filename);
 		text.append("\" = ");
 		text.append(std::to_string(hash));
 		text.append("\n");
-
-		delete[] buffer;
 	}
 
 	std::ofstream outwriter(outpath, std::ios_base::binary);
 	outwriter << text;
 	outwriter.close();
-
 }
 
 /*
@@ -1032,8 +1032,66 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 
 }
 
+void RebuildContainerMask(const fspath metapath, const fspath newarchivepath) {
+	// Read the entire archive into memory
+	BinaryOpener open(metapath.string());
+	assert(open.Okay());
+
+	
+	// Get addresses of relevant data pieces
+	char* archive = const_cast<char*>(open.ToReader().GetBuffer());
+	ResourceHeader* h = reinterpret_cast<ResourceHeader*>(archive);
+	ResourceEntry* e = reinterpret_cast<ResourceEntry*>(archive + sizeof(ResourceHeader));
+	char* compressed = archive + e->dataOffset;
+
+	// A few checks to ensure everything is normal
+	assert(h->numResources == 1);
+	assert(h->dataOffset == e->dataOffset);
+	assert(e->compMode == 2);
+	assert(e->defaultHash == e->dataCheckSum);
+
+	// Decompress the Oodle-compressed container mask
+	// 12 = 8 byte hash + 4 byte blob count;TODO: If adding multiple archives, multiply by number
+	char* decomp = new char[e->uncompressedSize + 12]; 
+	Oodle::DecompressBuffer(compressed, e->dataSize, decomp, e->uncompressedSize);
+
+	uint32_t* hashCount = reinterpret_cast<uint32_t*>(decomp);
+	uint64_t* newHash = reinterpret_cast<uint64_t*>(decomp + e->uncompressedSize);
+	uint32_t* blobSize = reinterpret_cast<uint32_t*>(decomp + e->uncompressedSize + sizeof(uint64_t));
+	//assert(*hashCount == 39);
+
+	// Add new hash to the container mask
+	*hashCount = *hashCount + 1;
+	*newHash = GetContainerMaskHash(newarchivepath);
+	*blobSize = 0;
+
+	/*
+	* - Unnecessary: Change data offset
+	* - Change data size
+	* - Change uncompressed size
+	* - Change defaultHash and data Check Sum
+	* - Change compMode to 0 (if we opt not to recompress it)
+	*/
+	// Modify the ResourceEntry - disabling compression on the file
+	// Todo: should probably recompress it instead of toggling it off
+	e->dataSize = e->uncompressedSize + 12;
+	e->uncompressedSize = e->dataSize;
+	e->compMode = 0;
+	e->defaultHash = HashLib::ResourceMurmurHash(std::string_view(decomp, e->dataSize));
+	e->dataCheckSum = e->defaultHash;
+
+
+	// Rewrite the file
+	std::ofstream writer(metapath, std::ios_base::binary);
+	writer.write(archive, h->dataOffset);
+	writer.write(decomp, e->dataSize);
+
+	delete[] decomp;
+}
+
 enum ArgFlags {
-	argflag_resetvanilla = 1 << 0
+	argflag_resetvanilla = 1 << 0,
+	argflag_deletebackups = 1 << 1
 };
 
 void Test_Injector(const fspath gamedir, const int argflags) {
@@ -1045,8 +1103,8 @@ void Test_Injector(const fspath gamedir, const int argflags) {
 	fspath outdir = basedir / "modarchives";
 	fspath outarchivepath = outdir / "common_mod.resources";
 	fspath pmspath = basedir / "packagemapspec.json";
-	fspath pmsbackup = pmspath;
-	pmsbackup += ".backup";
+	fspath metapath = basedir / "meta.resources";
+	fspath buildmanpath = basedir / "build-manifest.bin";
 
 	std::vector<fspath> loosemodpaths;
 	std::vector<fspath> zipmodpaths;
@@ -1063,18 +1121,31 @@ void Test_Injector(const fspath gamedir, const int argflags) {
 		std::error_code lastCode;
 		std::cout << "Managing backups and cleaning up previous injection files.\n";
 
-		// Ensure packagemapspec.json exists
-		if (!exists(pmspath)) {
-			std::cout << "ERROR: Could not find " << absolute(pmspath) << "\n";
-			return;
-		}
+		const fspath backedupfiles[] = {pmspath, metapath, buildmanpath};
 
-		// Backup packagemapspec.json - or restore it if backup already exists
-		if(!exists(pmsbackup)) {
-			copy_file(pmspath, pmsbackup, copy_options::none, lastCode);
-		}
-		else {
-			copy_file(pmsbackup, pmspath, copy_options::overwrite_existing, lastCode);
+		// Handle backups
+		for(int i = 0; i < sizeof(backedupfiles) / sizeof(backedupfiles[0]); i++) {
+			const fspath& original = backedupfiles[i];
+			const fspath backup = original.string() + ".backup";
+
+			// Ensure the original file exists
+			if (!exists(original)) {
+				std::cout << "ERROR: Could not find " << absolute(original);
+				return;
+			}
+
+			if (argflags & argflag_deletebackups) {
+				if(!exists(backup))
+					remove(backup, lastCode);
+			}
+
+			// Create backups, or restore originals if backups already exist
+			if(!exists(backup)) {
+				copy_file(original, backup, copy_options::none, lastCode);
+			}
+			else {
+				copy_file(backup, original, copy_options::overwrite_existing, lastCode);
+			}
 		}
 
 		// Create input/output directories if they don't exist yet
@@ -1207,6 +1278,7 @@ void Test_Injector(const fspath gamedir, const int argflags) {
 	if (supermod.size() > 0) {
 		BuildArchive(supermod, outarchivepath);
 		PackageMapSpec::InjectCommonArchive(gamedir, outarchivepath);
+		RebuildContainerMask(metapath, outarchivepath);
 	}
 	else {
 		std::cout << "\n\nNo mods will be loaded. All previously loaded mods are removed.\n";
@@ -1222,6 +1294,8 @@ void Test_Injector(const fspath gamedir, const int argflags) {
 }
 
 void Test_ContainerMask() {
+	std::set<uint64_t> maskhashes;
+
 	BinaryOpener opener("../input/container.mask");
 	assert(opener.Okay());
 	BinaryReader r = opener.ToReader();
@@ -1238,22 +1312,28 @@ void Test_ContainerMask() {
 		assert(hash != -1);
 		assert(r.ReadLE(paddingCount));
 		assert(r.ReadBytes(padding, paddingCount * sizeof(uint64_t)));
-		std::cout << r.GetRemaining() << "\n";
+		//std::cout << r.GetRemaining() << "\n";
+
+		maskhashes.insert(hash);
 	}
-
 	assert(r.GetRemaining() == 0);
+
+	
+	{
+		using namespace std::filesystem;
+
+		for(const directory_entry& entry : recursive_directory_iterator("D:/Steam/steamapps/common/DOOMTheDarkAges")) {
+			if(entry.is_directory())
+				continue;
+			if(entry.path().extension() != ".resources")
+				continue;
+			
+			uint64_t hash = GetContainerMaskHash(entry.path());
+			if(maskhashes.count(hash) == 0)
+				std::cout << "Missing Archive: " << entry.path().filename();
+		}
+	}
 }
-
-/*
-* Would need to:
-* - decrypt container mask
-* - Change data offset
-* - Change data size
-* - Change uncompressed size
-* - Change defaultHash and data Check Sum
-* - Change compMode to 0 (if we opt not to recompress it)
-*/
-
 
 int main(int argc, char* argv[]) {
 	#ifdef DOOMETERNAL
@@ -1269,8 +1349,9 @@ int main(int argc, char* argv[]) {
 	//Test_ContainerMask();
 
 	//Test_Injector("D:/Steam/steamapps/common/DOOMTheDarkAges", argflag_resetvanilla);
-	//Test_Injector("../input/darkages/injectortest");
-	
+	//Test_Injector("D:/Steam/steamapps/common/DOOMTheDarkAges", 0);
+	//Test_Injector("../input/darkages/injectortest", 0);
+	Test_ContainerMask();
 	//Test_DumpContainerMaskHashes(gamedir, outputdir);
 	//Test_DumpManifests(gamedir, outputdir);
 	//Test_DumpAllHeaders(gamedir, outputdir);
