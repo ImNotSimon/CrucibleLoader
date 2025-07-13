@@ -4,7 +4,6 @@
 #include "ResourceStructs.h"
 #include "ModReader.h"
 #include "entityslayer/Oodle.h"
-#include "entityslayer/EntityParser.h"
 #include "PackageMapSpec.h"
 #include <cassert>
 #include <filesystem>
@@ -1101,7 +1100,10 @@ void RebuildContainerMask(const fspath metapath, const fspath newarchivepath) {
 	* - Change compMode to 0 (if we opt not to recompress it)
 	*/
 	// Modify the ResourceEntry - disabling compression on the file
-	// Todo: should probably recompress it instead of toggling it off
+	
+	// IMPORTANT: The file must not be recompressed. Our gameupdate detection
+	// system relies on checking the size of meta to determine if
+	// the file is modded or not
 	e->dataSize = e->uncompressedSize + extraSize;
 	e->uncompressedSize = e->dataSize;
 	e->compMode = 0;
@@ -1117,9 +1119,24 @@ void RebuildContainerMask(const fspath metapath, const fspath newarchivepath) {
 	delete[] decomp;
 }
 
+bool IsModded_MapSpec(const fspath& path) {
+	BinaryOpener open(path.string());
+	BinaryReader reader = open.ToReader();
+
+	std::string_view view(reader.GetBuffer(), reader.GetLength());
+	return view.find("modarchives") != std::string_view::npos;
+}
+
+// This relies on not recompressing the container mask after editing it
+bool IsModded_Meta(const fspath& path) {
+	std::ifstream reader(path, std::ios_base::binary);
+	reader.seekg(0, std::ios_base::end);
+	return reader.tellg() > 25000;
+}
+
 enum ArgFlags {
 	argflag_resetvanilla = 1 << 0,
-	argflag_deletebackups = 1 << 1
+	argflag_gameupdated = 1 << 1,
 };
 
 void InjectorLoadMods(const fspath gamedir, const int argflags) {
@@ -1132,7 +1149,6 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 	fspath outarchivepath = outdir / "common_mod.resources";
 	fspath pmspath = basedir / "packagemapspec.json";
 	fspath metapath = basedir / "meta.resources";
-	fspath buildmanpath = basedir / "build-manifest.bin";
 
 	std::vector<fspath> loosemodpaths;
 	std::vector<fspath> zipmodpaths;
@@ -1149,10 +1165,12 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 		std::error_code lastCode;
 		std::cout << "Managing backups and cleaning up previous injection files.\n";
 
-		const fspath backedupfiles[] = {pmspath, metapath, buildmanpath};
+		#define NUM_BACKUPS 2
+		const fspath backedupfiles[NUM_BACKUPS] = {pmspath, metapath};
+		bool IsModded[NUM_BACKUPS] = { IsModded_MapSpec(pmspath), IsModded_Meta(metapath)};
 
 		// Handle backups
-		for(int i = 0; i < sizeof(backedupfiles) / sizeof(backedupfiles[0]); i++) {
+		for(int i = 0; i < NUM_BACKUPS; i++) {
 			const fspath& original = backedupfiles[i];
 			const fspath backup = original.string() + ".backup";
 
@@ -1162,17 +1180,27 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 				return;
 			}
 
-			if (argflags & argflag_deletebackups) {
-				if(!exists(backup))
-					remove(backup, lastCode);
-			}
-
-			// Create backups, or restore originals if backups already exist
-			if(!exists(backup)) {
+			// If the backup doesn't exist, assume this is a first time setup
+			// and copy it no matter what
+			if (!exists(backup)) {
 				copy_file(original, backup, copy_options::none, lastCode);
 			}
 			else {
-				copy_file(backup, original, copy_options::overwrite_existing, lastCode);
+				// The game updated, and the file isn't modded. This means either:
+				// 1. An updated version was downloaded
+				// 2. The file wasn't updated, but is still vanilla
+				// Either way, replace the original backup with this new version
+				if ((argflags & argflag_gameupdated) && !IsModded[i]) {
+					copy_file(original, backup, copy_options::overwrite_existing, lastCode);
+				}
+
+				// If this triggers, either:
+				// 1. There's no game update detected
+				// 2. There's a game update, but the file is modded. This means a new version
+				// wasn't downloaded. Hence, we restore from our existing backup
+				else {
+					copy_file(backup, original, copy_options::overwrite_existing, lastCode);
+				}
 			}
 		}
 
@@ -1232,12 +1260,13 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 				loosemodpaths.push_back(dirEntry.path());
 		}
 
-		std::cout << "\nZipped Paths\n";
-		for(const fspath& f : zipmodpaths)
-			std::cout << f << "\n";
-		std::cout << "\nLoose Paths\n";
-		for(const fspath& f : loosemodpaths)
-			std::cout << f << "\n";
+		//std::cout << "\nZipped Paths\n";
+		//for(const fspath& f : zipmodpaths)
+		//	std::cout << f << "\n";
+		//std::cout << "\nLoose Paths\n";
+		//for(const fspath& f : loosemodpaths)
+		//	std::cout << f << "\n";
+		std::cout << "\nZipped Mods Found: " << zipmodpaths.size() << " Loose Mods Found: " << loosemodpaths.size() << "\n";
 	}
 	
 
@@ -1245,7 +1274,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 	* READ MOD DATA
 	*/
 
-	std::cout << "\n\nReading Mods:\n";
+	std::cout << "\n\nReading Mods:\n----------\n";
 
 	int totalmods = static_cast<int>(zipmodpaths.size() + 1); // + 1 for the loose mod
 	ModDef* realmods = new ModDef[totalmods];
@@ -1261,7 +1290,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 	* priority version of every mod file. All mod file conflicts will be resolved here
 	* (conflicts from different mods, or from the same mods - in the case of bad aliasing setups)
 	*/
-	std::cout << "\n\nChecking for Conflicts:\n";
+	std::cout << "\n\nChecking for Conflicts:\n----------\n";
 
 	std::vector<const ModFile*> supermod;
 	{
@@ -1284,7 +1313,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 					std::cout << "CONFLICT FOUND: " << file.assetPath
 						<< "\n(A):" << current.modName << " - " << file.realPath
 						<< "\n(B):" << iter->second->parentMod->modName << " - " << iter->second->realPath
-						<< "\nWinner: " << (replaceMapping ? "(A)\n" : "(B)\n");
+						<< "\nWinner: " << (replaceMapping ? "(A)\n" : "(B)\n---\n");
 
 					if(replaceMapping) {
 						iter->second = &file;
@@ -1363,7 +1392,7 @@ void Test_ContainerMask() {
 	}
 }
 
-void InjectorMain() {
+void InjectorMain(const fspath gamedirectory) {
 
 	std::cout << R"(
 ----------------------------------------------
@@ -1374,55 +1403,56 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 ----------------------------------------------
 )";
 
-	bool firstTimeSetup = false;
-	fspath gamedirectory = "./";
 	const fspath configpath = "./modloader_config.txt";
 	const fspath oo2corepath = "./oo2core_9_win64.dll";
+	const fspath cachepath = "./modloader_cache.bin";
+	const fspath manifestpath = gamedirectory / "base/build-manifest.bin";
 
-	if(!std::filesystem::exists(configpath)) {
-		std::cout << "FATAL ERROR: Could not find " << configpath << "\n";
+	struct LoaderCache_t {
+		uint64_t manifesthash = -1;
+		uint64_t patchersucceeded = 0; // If > 0, then Dark Ages Patcher worked successfully
+	} loadercache, newcache;
+
+
+	/* Check the game directory is valid */
+	if (!std::filesystem::exists(gamedirectory) || !std::filesystem::is_directory(gamedirectory)) {
+		std::cout << "FATAL ERROR: " << gamedirectory << " is not a valid directory";
 		return;
 	}
 
-	/* Parse the mod injector's configuration file */
-	// TODO: This config will likely be replaced by command line arguments
-	try {
-		#define propSetup "firstTimeSetup"
-		#define propGamedir "gameDirectory"
-		EntityParser configParser(configpath.string(), ParsingMode::PERMISSIVE);
-		EntNode& root = *configParser.getRoot();
+	/*
+	* Read the Cache File if it exists
+	*/
+	if(std::filesystem::exists(cachepath))
+	{
+		std::ifstream cachereader(cachepath, std::ios_base::binary);
+		cachereader.seekg(0, std::ios_base::end);
+		if(cachereader.tellg() == sizeof(LoaderCache_t)) {
+			cachereader.seekg(0, std::ios_base::beg);
+			cachereader.read(reinterpret_cast<char*>(&loadercache), sizeof(LoaderCache_t));
+		}
+		else {
+			std::cout << "WARNING: Corrupted Mod Loader Cache file detected. Falling back to defaults\n";
+		}
+		cachereader.close();
+	}
 
-		// Determine if we must do a first time setup
-		EntNode& ftsNode = root[propSetup];
-		if (!ftsNode.ValueBool(firstTimeSetup)) {
-			std::cout << "FATAL ERROR: Config is missing or has invalid " << propSetup << " boolean";
+	/*
+	* To determine if the game has been updated, we hash part of the build-manifest
+	* and compare it with what's on file
+	*/
+	{
+		if (!std::filesystem::exists(manifestpath)) {
+			std::cout << "FATAL ERROR: Could not find " << manifestpath << "\n";
 			return;
 		}
+		std::ifstream manreader(manifestpath, std::ios_base::binary);
 
-		// An optional config property, intended for debugging
-		EntNode& dirNode = root[propGamedir];
-		if(&dirNode != EntNode::SEARCH_404) {
-			gamedirectory = dirNode.getValueUQ();
-			if (!std::filesystem::exists(gamedirectory) || !std::filesystem::is_directory(gamedirectory)) {
-				std::cout << "FATAL ERROR: Game directory does not exist\n";
-				return;
-			}
-		}
-
-		// Rewrite the config with the first time setup feature toggled off
-		if (firstTimeSetup) {
-			configParser.EditText("firstTimeSetup0", &ftsNode, strlen(propSetup), 0);
-			configParser.WriteToFile(configpath.string(), false);
-		}
-
-	}
-	catch (std::exception) {
-		std::cout << "FATAL ERROR: Could not parse " << configpath << "\n";
-		return;
-	}
-
-	if (firstTimeSetup) {
-		std::cout << "Running first time setup steps\n\n";
+		#define READ_COUNT 256
+		char buffer[READ_COUNT];
+		manreader.read(buffer, READ_COUNT);
+		newcache.manifesthash = HashLib::FarmHash64(buffer, READ_COUNT);
+		manreader.close();
 	}
 
 	/*
@@ -1449,10 +1479,17 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 	}
 
 
+	bool gameUpdated = newcache.manifesthash != loadercache.manifesthash;
+	if (gameUpdated) {
+		std::cout << "Game has been updated, or mod loader cache file could not be found. Performing update operations\n";
+	}
+
+	bool runPatcher = gameUpdated || loadercache.patchersucceeded == 0;
+
 	/*
 	* Run Proteh's Dark Ages Patcher
 	*/
-	if(firstTimeSetup)
+	if(runPatcher)
 	{
 		const fspath patcherpath = gamedirectory / "DarkAgesPatcher.exe";
 		const fspath exepath = gamedirectory / "DOOMTheDarkAges.exe";
@@ -1461,21 +1498,68 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 		if(!std::filesystem::exists(patcherpath))
 		{
 			std::cout << "FATAL ERROR: Could not find " << patcherpath << "\n";
+			return;
 		}
 
 		std::string updateCommand = patcherpath.string() + " --update";
 		std::string patchCommand = patcherpath.string() + " --patch ";
 		patchCommand.append(exepath.string());
 
-		std::cout << patchCommand;
+		struct {
+			uint16_t code;
+			uint8_t successfulpatches;
+			uint8_t failedpatches;
+		} returndata;
+
+		//std::cout << patchCommand;
 		system(updateCommand.c_str());
-		system(patchCommand.c_str());
+		*reinterpret_cast<int*>(&returndata) = system(patchCommand.c_str());
+
+		bool patchsuccess;
+		switch(returndata.code) {
+			case 6: // Executable already fully patched
+			patchsuccess = true;
+			break;
+
+			case 0: // Patches applied - may be partial or complete success
+			patchsuccess = returndata.failedpatches == 0;
+			break;
+
+			default: // Failure for other reasons
+			patchsuccess = false;
+			break;
+		}
+
+		std::cout << "Patcher Return Codes: " << returndata.code << " " << (int)returndata.successfulpatches << " " << (int)returndata.failedpatches << "\n";
+		if (!patchsuccess) {
+			
+			std::cout << "ERROR: Dark Ages Patcher partially or fully failed to patch your game executable.\n"
+				<< "Injection will proceed, but modding may not work correctly.\n"
+				<< "Press Enter to acknowledge this message.\n";
+			int acknowledge = getchar();
+
+		}
+
+		newcache.patchersucceeded = patchsuccess;
+	}
+	else {
+		newcache.patchersucceeded = loadercache.patchersucceeded;
+	}
+
+	/*
+	* Write the new loader cache file
+	*/
+	if(memcmp(&loadercache, &newcache, sizeof(LoaderCache_t)) != 0)
+	{
+		std::ofstream cachewriter(cachepath, std::ios_base::binary);
+		cachewriter.write(reinterpret_cast<char*>(&newcache), sizeof(LoaderCache_t));
+		cachewriter.close();
 	}
 
 	/*
 	* Run the mod loader
 	*/
-	InjectorLoadMods(gamedirectory, firstTimeSetup ? argflag_deletebackups : 0);
+	InjectorLoadMods(gamedirectory, gameUpdated ? argflag_gameupdated : 0);
 }
 
 int main(int argc, char* argv[]) {
@@ -1489,7 +1573,11 @@ int main(int argc, char* argv[]) {
 
 	fspath testgamedir = "../input/darkages/injectortest";
 
-	InjectorMain();
+	#ifdef _DEBUG
+	InjectorMain(gamedir);
+	#else
+	InjectorMain("./");
+	#endif
 	//InjectorLoadMods(gamedir, argflag_resetvanilla);
 
 	//Test_ContainerMask();

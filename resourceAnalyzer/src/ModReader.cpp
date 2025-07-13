@@ -89,7 +89,7 @@ void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const st
 {
 	if(pathlist.empty())
 		return;
-	std::cout << "Zipping Loose Mod Files\n";
+	//std::cout << "Zipping Loose Mod Files\n";
 
 	size_t substringIndex = tempzippath.parent_path().string().size() + 1; // + 1 Accounts for the backslash
 
@@ -124,7 +124,7 @@ void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const st
 	// Clean up heap data
 	mz_zip_writer_end(zptr);
 	delete[] buffer;
-	std::cout << "Finished zipping loose mod files\n";
+	//std::cout << "Finished zipping loose mod files\n";
 	
 	// Read the zip to a mod struct
 	ReadZipMod(readto, tempzippath, loaderVersion);
@@ -136,7 +136,7 @@ void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const st
 
 void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, const int loaderVersion)
 {
-	std::cout << "\nReading " << zipPath.filename();
+	std::cout << "\n\nReading " << zipPath.filename();
 
 	// Open the zip file
 	mz_zip_archive zipfile;
