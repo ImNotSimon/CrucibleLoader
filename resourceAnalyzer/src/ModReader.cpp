@@ -128,8 +128,10 @@ void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const st
 	
 	// Read the zip to a mod struct
 	ReadZipMod(readto, tempzippath, loaderVersion);
-	// todo: remove temporary zip file afterwards
 	// todo: mz_zip_reader_init_mem
+
+	// Delete the temporary mod zip
+	std::filesystem::remove(tempzippath);
 }
 
 void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, const int loaderVersion)

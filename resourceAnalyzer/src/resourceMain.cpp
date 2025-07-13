@@ -4,6 +4,7 @@
 #include "ResourceStructs.h"
 #include "ModReader.h"
 #include "entityslayer/Oodle.h"
+#include "entityslayer/EntityParser.h"
 #include "PackageMapSpec.h"
 #include <cassert>
 #include <filesystem>
@@ -13,6 +14,7 @@
 #include <set>
 
 #ifndef _DEBUG
+#undef assert
 #define assert(OP) (OP)
 #endif
 
@@ -507,7 +509,12 @@ void Test_DumpAllHeaders(const fspath gamedir, const fspath outdir) {
 	output.close();
 }
 
-uint64_t GetContainerMaskHash(const fspath archivepath) {
+struct containerMaskEntry_t {
+	uint64_t hash;
+	uint64_t numResources;
+};
+
+containerMaskEntry_t GetContainerMaskHash(const fspath archivepath) {
 	std::ifstream input(archivepath, std::ios_base::binary);
 
 	ResourceHeader h;
@@ -526,7 +533,11 @@ uint64_t GetContainerMaskHash(const fspath archivepath) {
 
 	uint64_t hash = HashLib::FarmHash64(buffer, len);
 	delete[] buffer;
-	return hash;
+
+	containerMaskEntry_t entrydata;
+	entrydata.hash = hash;
+	entrydata.numResources = h.numResources;
+	return entrydata;
 }
 
 void Test_DumpContainerMaskHashes(const fspath gamedir, const fspath outdir) {
@@ -542,7 +553,7 @@ void Test_DumpContainerMaskHashes(const fspath gamedir, const fspath outdir) {
 
 		std::string filename = entry.path().filename().string();
 
-		uint64_t hash = GetContainerMaskHash(entry.path());
+		uint64_t hash = GetContainerMaskHash(entry.path()).hash;
 
 		text.push_back('"');
 		text.append(filename);
@@ -879,8 +890,8 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 		assert(runningOffset == stringblob.length());
 		assert(runningIndex == archive.stringChunk.numStrings);
 		h.stringTableSize += static_cast<uint32_t>(runningOffset);
-		archive.stringChunk.paddingCount = h.stringTableSize % 8;
-		h.stringTableSize += 8 - static_cast<uint32_t>(archive.stringChunk.paddingCount);
+		archive.stringChunk.paddingCount = 8 - h.stringTableSize % 8;
+		h.stringTableSize += static_cast<uint32_t>(archive.stringChunk.paddingCount);
 
 		/*
 		* Copy over blob
@@ -1050,20 +1061,37 @@ void RebuildContainerMask(const fspath metapath, const fspath newarchivepath) {
 	assert(e->compMode == 2);
 	assert(e->defaultHash == e->dataCheckSum);
 
-	// Decompress the Oodle-compressed container mask
-	// 12 = 8 byte hash + 4 byte blob count;TODO: If adding multiple archives, multiply by number
-	char* decomp = new char[e->uncompressedSize + 12]; 
-	Oodle::DecompressBuffer(compressed, e->dataSize, decomp, e->uncompressedSize);
+	// TODO: If adding multiple archives, must do this for every archive
+	// Get data we'll be inserting into container mask
+	containerMaskEntry_t newentry = GetContainerMaskHash(newarchivepath);
 
+	// Number of uint64_t's in our bitmask.
+	// Ensure at least 1 just incase having 0 is bad
+	uint32_t bitmasklongs = static_cast<uint32_t>(newentry.numResources / 64 + (newentry.numResources % 64 ? 1 : 0) + 1);
+
+	// Hash + bitmasklongs + byte count of our bitmask
+	size_t extraSize = sizeof(uint64_t) + sizeof(uint32_t) + bitmasklongs * sizeof(uint64_t);
+
+	// Decompress the Oodle-compressed container mask
+	char* decomp = new char[e->uncompressedSize + extraSize]; 
+	if (!Oodle::DecompressBuffer(compressed, e->dataSize, decomp, e->uncompressedSize)) {
+		std::cout << "ERROR: FAILED TO DECOMPRESS CONTAINER MASK\n";
+		return;
+	}
+
+	// Important file offsets
 	uint32_t* hashCount = reinterpret_cast<uint32_t*>(decomp);
 	uint64_t* newHash = reinterpret_cast<uint64_t*>(decomp + e->uncompressedSize);
 	uint32_t* blobSize = reinterpret_cast<uint32_t*>(decomp + e->uncompressedSize + sizeof(uint64_t));
-	//assert(*hashCount == 39);
+	uint64_t* bitmask = reinterpret_cast<uint64_t*>(decomp + e->uncompressedSize + sizeof(uint64_t) + sizeof(uint32_t));
 
-	// Add new hash to the container mask
+	// Add new bitmask to the file
 	*hashCount = *hashCount + 1;
-	*newHash = GetContainerMaskHash(newarchivepath);
-	*blobSize = 0;
+	*newHash = newentry.hash;
+	*blobSize = bitmasklongs;
+	for(size_t i = 0; i < bitmasklongs; i++) {
+		*(bitmask + i) = -1;
+	}
 
 	/*
 	* - Unnecessary: Change data offset
@@ -1074,7 +1102,7 @@ void RebuildContainerMask(const fspath metapath, const fspath newarchivepath) {
 	*/
 	// Modify the ResourceEntry - disabling compression on the file
 	// Todo: should probably recompress it instead of toggling it off
-	e->dataSize = e->uncompressedSize + 12;
+	e->dataSize = e->uncompressedSize + extraSize;
 	e->uncompressedSize = e->dataSize;
 	e->compMode = 0;
 	e->defaultHash = HashLib::ResourceMurmurHash(std::string_view(decomp, e->dataSize));
@@ -1094,7 +1122,7 @@ enum ArgFlags {
 	argflag_deletebackups = 1 << 1
 };
 
-void Test_Injector(const fspath gamedir, const int argflags) {
+void InjectorLoadMods(const fspath gamedir, const int argflags) {
 	#define INJECTOR_VERSION 1
 
 	fspath modsdir = gamedir / "mods";
@@ -1328,11 +1356,126 @@ void Test_ContainerMask() {
 			if(entry.path().extension() != ".resources")
 				continue;
 			
-			uint64_t hash = GetContainerMaskHash(entry.path());
+			uint64_t hash = GetContainerMaskHash(entry.path()).hash;
 			if(maskhashes.count(hash) == 0)
 				std::cout << "Missing Archive: " << entry.path().filename();
 		}
 	}
+}
+
+void InjectorMain() {
+
+	std::cout << R"(
+----------------------------------------------
+EntityAtlan Mod Loader for DOOM: The Dark Ages
+By FlavorfulGecko5
+With Special Thanks to: Proteh, Zwip-Zwap-Zapony, Tjoener, and many other talented modders!
+https://github.com/FlavorfulGecko5/EntityAtlan/
+----------------------------------------------
+)";
+
+	bool firstTimeSetup = false;
+	fspath gamedirectory = "./";
+	const fspath configpath = "./modloader_config.txt";
+	const fspath oo2corepath = "./oo2core_9_win64.dll";
+
+	if(!std::filesystem::exists(configpath)) {
+		std::cout << "FATAL ERROR: Could not find " << configpath << "\n";
+		return;
+	}
+
+	/* Parse the mod injector's configuration file */
+	// TODO: This config will likely be replaced by command line arguments
+	try {
+		#define propSetup "firstTimeSetup"
+		#define propGamedir "gameDirectory"
+		EntityParser configParser(configpath.string(), ParsingMode::PERMISSIVE);
+		EntNode& root = *configParser.getRoot();
+
+		// Determine if we must do a first time setup
+		EntNode& ftsNode = root[propSetup];
+		if (!ftsNode.ValueBool(firstTimeSetup)) {
+			std::cout << "FATAL ERROR: Config is missing or has invalid " << propSetup << " boolean";
+			return;
+		}
+
+		// An optional config property, intended for debugging
+		EntNode& dirNode = root[propGamedir];
+		if(&dirNode != EntNode::SEARCH_404) {
+			gamedirectory = dirNode.getValueUQ();
+			if (!std::filesystem::exists(gamedirectory) || !std::filesystem::is_directory(gamedirectory)) {
+				std::cout << "FATAL ERROR: Game directory does not exist\n";
+				return;
+			}
+		}
+
+		// Rewrite the config with the first time setup feature toggled off
+		if (firstTimeSetup) {
+			configParser.EditText("firstTimeSetup0", &ftsNode, strlen(propSetup), 0);
+			configParser.WriteToFile(configpath.string(), false);
+		}
+
+	}
+	catch (std::exception) {
+		std::cout << "FATAL ERROR: Could not parse " << configpath << "\n";
+		return;
+	}
+
+	if (firstTimeSetup) {
+		std::cout << "Running first time setup steps\n\n";
+	}
+
+	/*
+	* Download Oodle Compression dll if it doesn't exist
+	* No need to do this with every first time setup
+	*/
+
+	if(!std::filesystem::exists(oo2corepath)) {
+		#define OODLE_URL L"https://github.com/WorkingRobot/OodleUE/raw/refs/heads/main/Engine/Source/Programs/Shared/EpicGames.Oodle/Sdk/2.9.10/win/redist/oo2core_9_win64.dll"
+		std::cout << "Downloading " << oo2corepath << " from ";
+		std::wcout << OODLE_URL;
+		std::cout << "\n";
+
+		bool success = Oodle::Download(OODLE_URL, oo2corepath.wstring().c_str());
+		if (!success) {
+			std::cout << "FATAL ERROR: Failed to download " << oo2corepath << "\n";
+			return;
+		}
+		std::cout << "Download Complete (Oodle is a file decompression library)\n";
+	}
+	if (!Oodle::init()) {
+		std::cout << "FATAL ERROR: Failed to initialize " << oo2corepath << "\n";
+		return;
+	}
+
+
+	/*
+	* Run Proteh's Dark Ages Patcher
+	*/
+	if(firstTimeSetup)
+	{
+		const fspath patcherpath = gamedirectory / "DarkAgesPatcher.exe";
+		const fspath exepath = gamedirectory / "DOOMTheDarkAges.exe";
+
+		std::cout << "\nRunning DarkAgesPatcher.exe by Proteh\n";
+		if(!std::filesystem::exists(patcherpath))
+		{
+			std::cout << "FATAL ERROR: Could not find " << patcherpath << "\n";
+		}
+
+		std::string updateCommand = patcherpath.string() + " --update";
+		std::string patchCommand = patcherpath.string() + " --patch ";
+		patchCommand.append(exepath.string());
+
+		std::cout << patchCommand;
+		system(updateCommand.c_str());
+		system(patchCommand.c_str());
+	}
+
+	/*
+	* Run the mod loader
+	*/
+	InjectorLoadMods(gamedirectory, firstTimeSetup ? argflag_deletebackups : 0);
 }
 
 int main(int argc, char* argv[]) {
@@ -1346,12 +1489,12 @@ int main(int argc, char* argv[]) {
 
 	fspath testgamedir = "../input/darkages/injectortest";
 
-	//Test_ContainerMask();
+	InjectorMain();
+	//InjectorLoadMods(gamedir, argflag_resetvanilla);
 
-	//Test_Injector("D:/Steam/steamapps/common/DOOMTheDarkAges", argflag_resetvanilla);
-	//Test_Injector("D:/Steam/steamapps/common/DOOMTheDarkAges", 0);
-	//Test_Injector("../input/darkages/injectortest", 0);
-	Test_ContainerMask();
+	//Test_ContainerMask();
+	//PackageMapSpec::ToString(gamedir);
+	//Test_ContainerMask();
 	//Test_DumpContainerMaskHashes(gamedir, outputdir);
 	//Test_DumpManifests(gamedir, outputdir);
 	//Test_DumpAllHeaders(gamedir, outputdir);

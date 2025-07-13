@@ -4,7 +4,9 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
+#include <Urlmon.h>
 #include "Oodle.h"
+#pragma comment(lib, "urlmon.lib")
 
 /* Typedefs from original program */
 typedef unsigned char byte;
@@ -32,6 +34,11 @@ OodLZ_CompressFunc* OodLZ_Compress;
 OodLZ_DecompressFunc* OodLZ_Decompress;
 bool initializedSuccessfully = false;
 
+bool Oodle::Download(const wchar_t* url, const wchar_t* writeto) {
+    HRESULT result = URLDownloadToFile(NULL, url, writeto, 0, NULL);
+    return result == S_OK;
+}
+
 bool Oodle::IsInitialized() {
     return initializedSuccessfully;
 }
@@ -40,7 +47,7 @@ bool Oodle::init()
 {
     initializedSuccessfully = false;
 
-    oodle = LoadLibraryA("./oo2core_8_win64.dll");
+    oodle = LoadLibraryA("./oo2core_9_win64.dll");
     if (oodle == nullptr) // Could not find oodle binary
         return false;
 

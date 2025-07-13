@@ -3,6 +3,11 @@
 #include <cassert>
 #include <iostream>
 
+#ifndef _DEBUG
+#undef assert
+#define assert(OP) (OP)
+#endif
+
 void PackageMapSpec::ToString(const fspath gamedir) {
 	EntityParser entparser((gamedir / "base/packagemapspec.json").string(), ParsingMode::JSON);
 	EntNode& jsonroot = *entparser.getRoot()->ChildAt(0);
@@ -60,20 +65,42 @@ void PackageMapSpec::InjectCommonArchive(const fspath gamedir, const fspath newa
 	for (char& c : archrelativepath) {
 		if (c == '\\') c = '/';
 	}
-
 	//std::cout << archrelativepath;
 
-	// Get relevant nodes
-	EntNode& filelist = jsonroot["\"files\""];
-	EntNode& mapfilerefs = jsonroot["\"mapFileRefs\""];
+	// Ensure first map is the common map
+	assert(jsonroot["\"maps\""].ChildAt(0)->ChildAt(0)->getValueUQ() == "common");
 
-	// Insert the file name into the packagemapspec
 	char buffer[512];
-	snprintf(buffer, 512, R"({ "name": "%s" })", archrelativepath.c_str());
-	entparser.EditTree(buffer, &filelist, filelist.getChildCount(), 0, 0, 0);
 
-	snprintf(buffer, 512, R"({ "file": %s, "map": 0 })", std::to_string(filelist.getChildCount() - 1).c_str());
-	entparser.EditTree(buffer, &mapfilerefs, 0, 0, 0, 0);
+	// Insert archive into beginning of file list
+	// We must insert it at the beginning since this list dictates patch priority
+	{
+		EntNode& filelist = jsonroot["\"files\""];
+		snprintf(buffer, 512, R"({ "name": "%s" })", archrelativepath.c_str());
+		entparser.EditTree(buffer, &filelist, 0, 0, 0, 0);
+	}
+
+	// Now we must increment every file number in the map list to account for the insertion
+	{
+		EntNode& mapfilerefs = jsonroot["\"mapFileRefs\""];
+
+		for (int i = 0; i < mapfilerefs.getChildCount(); i++) {
+			EntNode& mapping = *mapfilerefs.ChildAt(i);
+			EntNode& file = mapping["\"file\""];
+			int index = -1;
+
+			assert(&file != EntNode::SEARCH_404);
+			assert(file.ValueInt(index, -999999, 999999));
+			index++;
+
+			std::string newText = "\"file\"";
+			newText.append(std::to_string(index));
+			entparser.EditText(newText, &file, 6, 0); // Note: This is a very hacky function. 6 is length of "file" (including quotes)
+		}
+
+		// Finally, we insert the new archive into common's mapFileRef
+		entparser.EditTree(R"({ "file": 0, "map": 0 })", &mapfilerefs, 0, 0, 0, 0);
+	}
 
 	entparser.WriteToFile(pmspath.string(), 0);
 }
