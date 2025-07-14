@@ -161,6 +161,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\GlobalConfig.h" />
     <ClInclude Include="src\ModReader.h" />
     <ClInclude Include="src\PackageMapSpec.h" />
     <ClInclude Include="src\ResourceStructs.h" />

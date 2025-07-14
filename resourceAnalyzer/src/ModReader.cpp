@@ -1,6 +1,7 @@
 #include "ModReader.h"
 #include "miniz/miniz.h"
 #include "entityslayer\EntityParser.h"
+#include "GlobalConfig.h"
 #include <unordered_map>
 #include <filesystem>
 #include <fstream>
@@ -30,7 +31,7 @@ void ReadConfigData(configData_t& cfg, mz_zip_archive* zptr)
 	*/
 	dataBuffer = static_cast<char*>(mz_zip_reader_extract_file_to_heap(zptr, CFG_PATH, &dataLength, 0));
 	if (!dataBuffer) {
-		std::cout << "\nWARNING: Could not find " << CFG_PATH;
+		std::cout << "WARNING: Could not find " << CFG_PATH << "\n";
 		return;
 	}
 
@@ -40,11 +41,11 @@ void ReadConfigData(configData_t& cfg, mz_zip_archive* zptr)
 	ParseResult presult = configParser.EditTree(std::string(dataBuffer, dataLength), configParser.getRoot(), 0, 0, 0, 0);
 	delete[] dataBuffer;
 	if (!presult.success) {
-		std::cout << "\nWARNING: " << CFG_PATH << " cannot be read due to syntax errors.";
+		std::cout << "WARNING: " << CFG_PATH << " cannot be read due to syntax errors." << "\n";
 		return;
 	}
 
-	std::cout << "\nFound " << CFG_PATH;
+	std::cout << "Found " << CFG_PATH << "\n";
 
 	/*
 	* Read config properties
@@ -57,11 +58,11 @@ void ReadConfigData(configData_t& cfg, mz_zip_archive* zptr)
 
 	if (!foundReqVersion) 
 	{
-		std::cout << "\nWARNING: " << CFG_REQUIREDVERSION << " not found. Using default value";
+		std::cout << "WARNING: " << CFG_REQUIREDVERSION << " not found. Using default value\n";
 	}
 	if (!foundLoadPriority) 
 	{
-		std::cout << "\nWARNING: " << CFG_LOADPRIORITY << " not found. Using default value";
+		std::cout << "WARNING: " << CFG_LOADPRIORITY << " not found. Using default value\n";
 	}
 
 	/*
@@ -70,8 +71,12 @@ void ReadConfigData(configData_t& cfg, mz_zip_archive* zptr)
 	EntNode& aliasNode = root[CFG_ALIASES];
 	for (int i = 0, max = aliasNode.getChildCount(); i < max; i++) {
 		EntNode& currentAlias = *aliasNode.ChildAt(i);
+		if(currentAlias.IsComment())
+			continue;
 		cfg.alias.emplace(currentAlias.getNameUQ(), currentAlias.getValueUQ());
 	}
+	if(cfg.alias.size() > 0)
+		std::cout << "Found " << cfg.alias.size() << " alias definitions\n";
 
 	//for (auto& pair : cfg.alias) {
 	//	std::cout << "\n" << pair.first << "-" << pair.second;
@@ -85,11 +90,11 @@ void ReadConfigData(configData_t& cfg, mz_zip_archive* zptr)
 * codepaths that must behave exactly the same while using two completely different IO interfaces.
 * It's far less of a headache to merge the rarely-used codepath into the commonly used one.
 */
-void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const std::vector<fspath>& pathlist, const int loaderVersion)
+void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const std::vector<fspath>& pathlist, int argflags)
 {
 	if(pathlist.empty())
 		return;
-	//std::cout << "Zipping Loose Mod Files\n";
+	std::cout << "Zipping Loose Mod Files\n";
 
 	size_t substringIndex = tempzippath.parent_path().string().size() + 1; // + 1 Accounts for the backslash
 
@@ -127,16 +132,16 @@ void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const st
 	//std::cout << "Finished zipping loose mod files\n";
 	
 	// Read the zip to a mod struct
-	ReadZipMod(readto, tempzippath, loaderVersion);
+	ReadZipMod(readto, tempzippath, argflags);
 	// todo: mz_zip_reader_init_mem
 
 	// Delete the temporary mod zip
 	std::filesystem::remove(tempzippath);
 }
 
-void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, const int loaderVersion)
+void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
 {
-	std::cout << "\n\nReading " << zipPath.filename();
+	std::cout << "\n\nReading " << zipPath.filename() << "\n---\n";
 
 	// Open the zip file
 	mz_zip_archive zipfile;
@@ -144,7 +149,7 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, const int loaderV
 	mz_zip_zero_struct(zptr);
 	if (!mz_zip_reader_init_file(zptr, zipPath.string().c_str(), 0))
 	{
-		std::cout << "Failed to open zip file\n";
+		std::cout << "ERROR: Failed to open zip file\n";
 		return;
 	}
 	
@@ -159,8 +164,8 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, const int loaderV
 	/*
 	* Check if version requirement is met. If it isn't, skip reading the mod files
 	*/
-	if (loaderVersion < cfg.requiredversion) {
-		std::cout << "\nERROR: Mod requires Mod Loader Version " << cfg.requiredversion << " or greater. (Your version is " << loaderVersion << ")\n";
+	if (MOD_LOADER_VERSION < cfg.requiredversion) {
+		std::cout << "ERROR: Mod requires Mod Loader Version " << cfg.requiredversion << " or greater. (Your version is " << MOD_LOADER_VERSION << ")\n";
 		mz_zip_reader_end(zptr);
 		return;
 	}
@@ -196,8 +201,6 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, const int loaderV
 		*/
 		if(modfile.realPath == CFG_PATH)
 			continue;
-		std::cout << "\n   \"" << modfile.realPath << "\" --> ";
-
 
 		/*
 		* If an alias exists for this file name, load it into the name buffer
@@ -227,7 +230,7 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, const int loaderV
 				break;
 		}
 		if (delimiter >= nameLength) {
-			std::cout << "ERROR: Missing resource type string";
+			std::cout << "ERROR: Missing resource type string for file " << modfile.realPath << "\n";
 			continue;
 		}
 		std::string typeString = std::string(nameBuffer, delimiter);
@@ -240,7 +243,7 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, const int loaderV
 			modfile.assetType = ModFileType::rs_streamfile;
 		}
 		else {
-			std::cout << "ERROR: Unknown/Unsupported resource type \"" << typeString << "\"";
+			std::cout << "ERROR: Unsupported resource type for file \"" << modfile.realPath << "\"\n";
 			continue;
 		}
 
@@ -248,23 +251,47 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, const int loaderV
 		/*
 		* Create the resource string - Beginning after the resource type
 		*/
+		bool hasBadChars = false;
 		char* nameEnd = nameBuffer + delimiter + 1;
 		while (nameEnd < nameBuffer + nameLength) {
-			if (*nameEnd == '@' || *nameEnd == '\\') {
+			switch (*nameEnd) 
+			{
+				case '@': case '\\':
 				*nameEnd = '/';
-			}
-			else if (*nameEnd == '.') {
+				break;
+
+				// EntityDefs have no extension
+				case '.':
 				if (modfile.assetType == ModFileType::entityDef) {
-					break;
+					goto LABEL_EARLY_OUT;
 				}
+				break;
+
+				case ' ':
+				*nameEnd = '_';
+				hasBadChars = true;
+				break;
+
+				// TODO: When images and other files with crazy extensions are supported,
+				// will need to identify what characters are considered acceptable to have in them
+
+				// Capital letters in file names can cause asset instability
+				// in idStudio. Probably best to enforce the all-lowercase standard
+				default:
+				if (*nameEnd <= 'Z' && *nameEnd >= 'A') {
+					*nameEnd += 32;
+					hasBadChars = true;
+				}
+				break;
 			}
 			nameEnd++;
 		}
+		LABEL_EARLY_OUT:
 		modfile.assetPath = std::string(nameBuffer + delimiter + 1, nameEnd);
 
-		// TODO: Should probably do a thorough error checking of the asset path.
-		// Ensure things like there's no whitespace, etc.
-		std::cout << modfile.assetPath;
+		if (hasBadChars) {
+			std::cout << "WARNING: Fixed capital letters or other bad characters in path " << modfile.realPath << "\n";
+		}
 
 		/*
 		* Read the mod data
@@ -274,12 +301,15 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, const int loaderV
 		size_t dataLength = 0;
 		dataBuffer = mz_zip_reader_extract_to_heap(zptr, i, &dataLength, 0);
 		if (!dataBuffer) {
-			std::cout << " ERROR: Failed to extract file\n";
+			std::cout << "ERROR: Failed to extract file " << modfile.realPath << "\n";
 			continue;
 		}
 		modfile.dataBuffer = dataBuffer;
 		modfile.dataLength = dataLength;
 
+		if (argflags & argflag_verbose) {
+			std::cout << "OK: " << modfile.realPath << " --> " << modfile.assetPath << "\n";
+		}
 
 		/*
 		* Finish processing the file

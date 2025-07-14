@@ -1,6 +1,5 @@
 #pragma once
 #include <filesystem>
-#include "entityslayer\GenericBlockAllocator.h"
 
 struct ModDef;
 struct ModFile;
@@ -40,6 +39,6 @@ inline void ModDef_Free(ModDef& mod) {
 
 namespace ModReader {
 	
-	void ReadLooseMod(ModDef& readto, const fspath& tempzippath, const std::vector<fspath>& pathlist, const int loaderVersion);
-	void ReadZipMod(ModDef& readto, const fspath& zipPath, const int loaderVersion);
+	void ReadLooseMod(ModDef& readto, const fspath& tempzippath, const std::vector<fspath>& pathlist, int argflags);
+	void ReadZipMod(ModDef& readto, const fspath& zipPath, int argflags);
 }

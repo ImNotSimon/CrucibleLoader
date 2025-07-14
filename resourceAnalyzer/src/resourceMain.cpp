@@ -5,6 +5,7 @@
 #include "ModReader.h"
 #include "entityslayer/Oodle.h"
 #include "PackageMapSpec.h"
+#include "GlobalConfig.h"
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -1042,6 +1043,8 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 
 }
 
+#define MODDED_TIMESTAMP 123456
+
 void RebuildContainerMask(const fspath metapath, const fspath newarchivepath) {
 	// Read the entire archive into memory
 	BinaryOpener open(metapath.string());
@@ -1099,17 +1102,16 @@ void RebuildContainerMask(const fspath metapath, const fspath newarchivepath) {
 	* - Change defaultHash and data Check Sum
 	* - Change compMode to 0 (if we opt not to recompress it)
 	*/
-	// Modify the ResourceEntry - disabling compression on the file
-	
-	// IMPORTANT: The file must not be recompressed. Our gameupdate detection
-	// system relies on checking the size of meta to determine if
-	// the file is modded or not
+	// Modify the ResourceEntry - disabling compression on the file should be fine
 	e->dataSize = e->uncompressedSize + extraSize;
 	e->uncompressedSize = e->dataSize;
 	e->compMode = 0;
 	e->defaultHash = HashLib::ResourceMurmurHash(std::string_view(decomp, e->dataSize));
 	e->dataCheckSum = e->defaultHash;
 
+	// IMPORTANT: Our gameupdate detection system relies on checking this value
+	// to determine if meta.resources is modded or not.
+	e->generationTimeStamp = MODDED_TIMESTAMP; 
 
 	// Rewrite the file
 	std::ofstream writer(metapath, std::ios_base::binary);
@@ -1127,21 +1129,17 @@ bool IsModded_MapSpec(const fspath& path) {
 	return view.find("modarchives") != std::string_view::npos;
 }
 
-// This relies on not recompressing the container mask after editing it
 bool IsModded_Meta(const fspath& path) {
+	ResourceEntry e;
+
 	std::ifstream reader(path, std::ios_base::binary);
-	reader.seekg(0, std::ios_base::end);
-	return reader.tellg() > 25000;
+	reader.seekg(sizeof(ResourceHeader), std::ios_base::beg);
+	reader.read(reinterpret_cast<char*>(&e), sizeof(ResourceEntry));
+
+	return e.generationTimeStamp == MODDED_TIMESTAMP;
 }
 
-enum ArgFlags {
-	argflag_resetvanilla = 1 << 0,
-	argflag_gameupdated = 1 << 1,
-};
-
 void InjectorLoadMods(const fspath gamedir, const int argflags) {
-	#define INJECTOR_VERSION 1
-
 	fspath modsdir = gamedir / "mods";
 	fspath loosezippath = modsdir / "TEMPORARY_unzipped_modfiles.zip";
 	fspath basedir = gamedir / "base";
@@ -1163,7 +1161,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 		using namespace std::filesystem;
 
 		std::error_code lastCode;
-		std::cout << "Managing backups and cleaning up previous injection files.\n";
+		//std::cout << "Managing backups and cleaning up previous injection files.\n";
 
 		#define NUM_BACKUPS 2
 		const fspath backedupfiles[NUM_BACKUPS] = {pmspath, metapath};
@@ -1280,9 +1278,9 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 	ModDef* realmods = new ModDef[totalmods];
 
 	realmods[0].loadPriority = -999;
-	ModReader::ReadLooseMod(realmods[0], loosezippath, loosemodpaths, INJECTOR_VERSION);
+	ModReader::ReadLooseMod(realmods[0], loosezippath, loosemodpaths, argflags);
 	for (int i = 1; i < totalmods; i++) {
-		ModReader::ReadZipMod(realmods[i], zipmodpaths[i - 1], INJECTOR_VERSION);
+		ModReader::ReadZipMod(realmods[i], zipmodpaths[i - 1], argflags);
 	}
 
 	/*
@@ -1392,16 +1390,58 @@ void Test_ContainerMask() {
 	}
 }
 
-void InjectorMain(const fspath gamedirectory) {
+void InjectorMain(int argc, char* argv[]) {
 
-	std::cout << R"(
+	printf( R"(
 ----------------------------------------------
-EntityAtlan Mod Loader for DOOM: The Dark Ages
+Atlan Mod Loader v%d for DOOM: The Dark Ages
 By FlavorfulGecko5
 With Special Thanks to: Proteh, Zwip-Zwap-Zapony, Tjoener, and many other talented modders!
 https://github.com/FlavorfulGecko5/EntityAtlan/
 ----------------------------------------------
-)";
+)", MOD_LOADER_VERSION);
+
+	int argflags = 0;
+	fspath gamedirectory = "./";
+
+	/*
+	* Parse Command Line Arguments
+	*/
+	for(int i = 1; i < argc; i++) {
+		std::string_view arg = argv[i];
+
+		if(arg == "--verbose") {
+			std::cout << "ARGS: Verbose Logging Enabled\n";
+			argflags |= argflag_verbose;
+		}
+
+		else if (arg == "--nolaunch") {
+			std::cout << "ARGS: Game will not launch after loading mods\n";
+			argflags |= argflag_nolaunch;
+		}
+
+		else if (arg == "--forceload") {
+			std::cout << "ARGS: Mod loading will proceed if DarkAgesPatcher fails\n"
+				<< "WARNING: Loading mods when DarkAgesPatcher fails may cause the game to permanently crash on startup.\n"
+				<< "If this happens, you will need to unload all mods for the game to work again.\n"
+				<< "Press ENTER to acknowledge this warning.\n";
+			char c = getchar();
+			argflags |= argflag_forceload;
+		}
+
+		else if(arg == "--gamedir") { // This is for debug builds
+			if(++i == argc)
+				goto LABEL_EXIT_HELP;
+			gamedirectory = argv[i];
+			std::cout << "ARGS: Custom game directory accepted\n";
+		}
+
+		else {
+			LABEL_EXIT_HELP:
+			std::cout << "AtlanModLoader.exe [--verbose] [--nolaunch] [--forceload] [--gamedir <Dark Ages Installation Folder>]\n";
+			return;
+		}
+	}
 
 	const fspath configpath = "./modloader_config.txt";
 	const fspath oo2corepath = "./oo2core_9_win64.dll";
@@ -1481,6 +1521,7 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 
 	bool gameUpdated = newcache.manifesthash != loadercache.manifesthash;
 	if (gameUpdated) {
+		argflags |= argflag_gameupdated;
 		std::cout << "Game has been updated, or mod loader cache file could not be found. Performing update operations\n";
 	}
 
@@ -1533,11 +1574,18 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 		std::cout << "Patcher Return Codes: " << returndata.code << " " << (int)returndata.successfulpatches << " " << (int)returndata.failedpatches << "\n";
 		if (!patchsuccess) {
 			
-			std::cout << "ERROR: Dark Ages Patcher partially or fully failed to patch your game executable.\n"
-				<< "Injection will proceed, but modding may not work correctly.\n"
-				<< "Press Enter to acknowledge this message.\n";
-			int acknowledge = getchar();
+			std::cout << "ERROR: Dark Ages Patcher partially or fully failed to patch your game executable.\n";
 
+			if(argflags & argflag_forceload) {
+				std::cout << "Proceeding with mod loading due to --forceload\n";
+			}
+			else {
+				// Should be fine to abort right here without saving the cache file - like this injection attempt never happened
+				std::cout << "Loading mods when DarkAgesPatcher fails may cause the game to permanently crash on startup.\n"
+					<< "Mod loading is being aborted out of caution.\n"
+					<< "At your own risk, you may run the mod loader with --forceload to bypass this safety measure.\n";
+				return;
+			}
 		}
 
 		newcache.patchersucceeded = patchsuccess;
@@ -1559,34 +1607,64 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 	/*
 	* Run the mod loader
 	*/
-	InjectorLoadMods(gamedirectory, gameUpdated ? argflag_gameupdated : 0);
+	InjectorLoadMods(gamedirectory, argflags);
+
+	/*
+	* Finish up
+	*/
+	std::cout << "\nMod Loading Complete\n----------\n";
+
+	if (argflags & argflag_nolaunch) {
+		std::cout << "Game will not launch due to nolaunch argument\n";
+		return;
+	}
+
+	const fspath absdir = std::filesystem::absolute(gamedirectory);
+
+	if (absdir.string().find("steamapps") != std::string_view::npos) {
+		std::cout << "Launching Game with Steam\n";
+		std::system("start \"\" \"steam://run/3017860//\"");
+	}
+	else {
+		std::cout << "Could not determine how to automatically launch your game\n"
+			<< "Please launch it manually.\n";
+	}
+	
 }
 
 int main(int argc, char* argv[]) {
-	#ifdef DOOMETERNAL
-	fspath gamedir = "D:/Steam/steamapps/common/DOOMEternal";
-	fspath outputdir = "../input/eternal";
-	#else
-	fspath gamedir = "D:/Steam/steamapps/common/DOOMTheDarkAges";
-	fspath outputdir = "../input/darkages";
+
+	#define AtlanModLoader 1 
+	#define AtlanExtractor 0
+
+	#if AtlanModLoader
+	InjectorMain(argc, argv);
+	#elif AtlanExtractor
 	#endif
 
-	fspath testgamedir = "../input/darkages/injectortest";
-
-	#ifdef _DEBUG
-	InjectorMain(gamedir);
-	#else
-	InjectorMain("./");
-	#endif
-	//InjectorLoadMods(gamedir, argflag_resetvanilla);
-
-	//Test_ContainerMask();
-	//PackageMapSpec::ToString(gamedir);
-	//Test_ContainerMask();
-	//Test_DumpContainerMaskHashes(gamedir, outputdir);
-	//Test_DumpManifests(gamedir, outputdir);
-	//Test_DumpAllHeaders(gamedir, outputdir);
-	//Test_DumpPriorityManifest();
-	//Test_DumpConsolidatedFiles(gamedir, outputdir);
-	//Test_DumpCommonManifest();
 }
+
+//int main(int argc, char* argv[]) {
+//	#ifdef DOOMETERNAL
+//	fspath gamedir = "D:/Steam/steamapps/common/DOOMEternal";
+//	fspath outputdir = "../input/eternal";
+//	#else
+//	fspath gamedir = "D:/Steam/steamapps/common/DOOMTheDarkAges";
+//	fspath outputdir = "../input/darkages";
+//	#endif
+//
+//	fspath testgamedir = "../input/darkages/injectortest";
+//
+//	InjectorMain(0);
+//	InjectorLoadMods(gamedir, argflag_resetvanilla);
+//
+//	Test_ContainerMask();
+//	PackageMapSpec::ToString(gamedir);
+//	Test_ContainerMask();
+//	Test_DumpContainerMaskHashes(gamedir, outputdir);
+//	Test_DumpManifests(gamedir, outputdir);
+//	Test_DumpAllHeaders(gamedir, outputdir);
+//	Test_DumpPriorityManifest();
+//	Test_DumpConsolidatedFiles(gamedir, outputdir);
+//	Test_DumpCommonManifest();
+//}
