@@ -6,6 +6,7 @@ namespace Oodle
 {
     bool Download(const wchar_t* url, const wchar_t* saveto);
     bool init();
+    bool init(const char* dllpath);
     bool IsInitialized();
     bool DecompressBuffer(char* inputBuffer, size_t inputSize, char* outputBuffer, size_t outputSize);
     bool CompressBuffer(char* inputBuffer, size_t inputSize, char* outputBuffer, size_t& outputSize);

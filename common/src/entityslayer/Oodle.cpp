@@ -43,11 +43,15 @@ bool Oodle::IsInitialized() {
     return initializedSuccessfully;
 }
 
-bool Oodle::init()
+bool Oodle::init() {
+    return Oodle::init("./oo2core_9_win64.dll");
+}
+
+bool Oodle::init(const char* dllpath)
 {
     initializedSuccessfully = false;
 
-    oodle = LoadLibraryA("./oo2core_9_win64.dll");
+    oodle = LoadLibraryA(dllpath);
     if (oodle == nullptr) // Could not find oodle binary
         return false;
 

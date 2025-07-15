@@ -31,7 +31,7 @@ void ReadConfigData(configData_t& cfg, mz_zip_archive* zptr)
 	*/
 	dataBuffer = static_cast<char*>(mz_zip_reader_extract_file_to_heap(zptr, CFG_PATH, &dataLength, 0));
 	if (!dataBuffer) {
-		std::cout << "WARNING: Could not find " << CFG_PATH << "\n";
+		atlog << "WARNING: Could not find " << CFG_PATH << "\n";
 		return;
 	}
 
@@ -41,11 +41,11 @@ void ReadConfigData(configData_t& cfg, mz_zip_archive* zptr)
 	ParseResult presult = configParser.EditTree(std::string(dataBuffer, dataLength), configParser.getRoot(), 0, 0, 0, 0);
 	delete[] dataBuffer;
 	if (!presult.success) {
-		std::cout << "WARNING: " << CFG_PATH << " cannot be read due to syntax errors." << "\n";
+		atlog << "WARNING: " << CFG_PATH << " cannot be read due to syntax errors." << "\n";
 		return;
 	}
 
-	std::cout << "Found " << CFG_PATH << "\n";
+	atlog << "Found " << CFG_PATH << "\n";
 
 	/*
 	* Read config properties
@@ -58,11 +58,11 @@ void ReadConfigData(configData_t& cfg, mz_zip_archive* zptr)
 
 	if (!foundReqVersion) 
 	{
-		std::cout << "WARNING: " << CFG_REQUIREDVERSION << " not found. Using default value\n";
+		atlog << "WARNING: " << CFG_REQUIREDVERSION << " not found. Using default value\n";
 	}
 	if (!foundLoadPriority) 
 	{
-		std::cout << "WARNING: " << CFG_LOADPRIORITY << " not found. Using default value\n";
+		atlog << "WARNING: " << CFG_LOADPRIORITY << " not found. Using default value\n";
 	}
 
 	/*
@@ -76,10 +76,10 @@ void ReadConfigData(configData_t& cfg, mz_zip_archive* zptr)
 		cfg.alias.emplace(currentAlias.getNameUQ(), currentAlias.getValueUQ());
 	}
 	if(cfg.alias.size() > 0)
-		std::cout << "Found " << cfg.alias.size() << " alias definitions\n";
+		atlog << "Found " << cfg.alias.size() << " alias definitions\n";
 
 	//for (auto& pair : cfg.alias) {
-	//	std::cout << "\n" << pair.first << "-" << pair.second;
+	//	atlog << "\n" << pair.first << "-" << pair.second;
 	//}
 }
 
@@ -94,7 +94,7 @@ void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const st
 {
 	if(pathlist.empty())
 		return;
-	std::cout << "Zipping Loose Mod Files\n";
+	atlog << "Zipping Loose Mod Files\n";
 
 	size_t substringIndex = tempzippath.parent_path().string().size() + 1; // + 1 Accounts for the backslash
 
@@ -110,7 +110,7 @@ void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const st
 
 		bool result = mz_zip_writer_add_file(zptr, zippedName.c_str(), fp.string().c_str(), "", 0, MZ_DEFAULT_COMPRESSION);
 		if (!result)
-			std::cout << "ERROR: Failed to add file to zip\n";
+			atlog << "ERROR: Failed to add file to zip\n";
 	}
 
 	// Get the finished zip data
@@ -118,7 +118,7 @@ void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const st
 	void* buffer = nullptr;
 	bool finalize = mz_zip_writer_finalize_heap_archive(zptr, &buffer, &bufferused);
 	if (!finalize) {
-		std::cout << "ERROR: Failed to finalize zip archive\n";
+		atlog << "ERROR: Failed to finalize zip archive\n";
 	}
 
 	// Write the zip data
@@ -129,7 +129,7 @@ void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const st
 	// Clean up heap data
 	mz_zip_writer_end(zptr);
 	delete[] buffer;
-	//std::cout << "Finished zipping loose mod files\n";
+	//atlog << "Finished zipping loose mod files\n";
 	
 	// Read the zip to a mod struct
 	ReadZipMod(readto, tempzippath, argflags);
@@ -141,7 +141,7 @@ void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const st
 
 void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
 {
-	std::cout << "\n\nReading " << zipPath.filename() << "\n---\n";
+	atlog << "\n\nReading " << zipPath.filename() << "\n---\n";
 
 	// Open the zip file
 	mz_zip_archive zipfile;
@@ -149,7 +149,7 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
 	mz_zip_zero_struct(zptr);
 	if (!mz_zip_reader_init_file(zptr, zipPath.string().c_str(), 0))
 	{
-		std::cout << "ERROR: Failed to open zip file\n";
+		atlog << "ERROR: Failed to open zip file\n";
 		return;
 	}
 	
@@ -165,7 +165,7 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
 	* Check if version requirement is met. If it isn't, skip reading the mod files
 	*/
 	if (MOD_LOADER_VERSION < cfg.requiredversion) {
-		std::cout << "ERROR: Mod requires Mod Loader Version " << cfg.requiredversion << " or greater. (Your version is " << MOD_LOADER_VERSION << ")\n";
+		atlog << "ERROR: Mod requires Mod Loader Version " << cfg.requiredversion << " or greater. (Your version is " << MOD_LOADER_VERSION << ")\n";
 		mz_zip_reader_end(zptr);
 		return;
 	}
@@ -230,7 +230,7 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
 				break;
 		}
 		if (delimiter >= nameLength) {
-			std::cout << "ERROR: Missing resource type string for file " << modfile.realPath << "\n";
+			atlog << "ERROR: Missing resource type string for file " << modfile.realPath << "\n";
 			continue;
 		}
 		std::string typeString = std::string(nameBuffer, delimiter);
@@ -243,7 +243,7 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
 			modfile.assetType = ModFileType::rs_streamfile;
 		}
 		else {
-			std::cout << "ERROR: Unsupported resource type for file \"" << modfile.realPath << "\"\n";
+			atlog << "ERROR: Unsupported resource type for file \"" << modfile.realPath << "\"\n";
 			continue;
 		}
 
@@ -290,7 +290,7 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
 		modfile.assetPath = std::string(nameBuffer + delimiter + 1, nameEnd);
 
 		if (hasBadChars) {
-			std::cout << "WARNING: Fixed capital letters or other bad characters in path " << modfile.realPath << "\n";
+			atlog << "WARNING: Fixed capital letters or other bad characters in path " << modfile.realPath << "\n";
 		}
 
 		/*
@@ -301,14 +301,17 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
 		size_t dataLength = 0;
 		dataBuffer = mz_zip_reader_extract_to_heap(zptr, i, &dataLength, 0);
 		if (!dataBuffer) {
-			std::cout << "ERROR: Failed to extract file " << modfile.realPath << "\n";
+			atlog << "ERROR: Failed to extract file " << modfile.realPath << "\n";
 			continue;
 		}
 		modfile.dataBuffer = dataBuffer;
 		modfile.dataLength = dataLength;
 
 		if (argflags & argflag_verbose) {
-			std::cout << "OK: " << modfile.realPath << " --> " << modfile.assetPath << "\n";
+			atlog << "OK: " << modfile.realPath << " --> " << modfile.assetPath << "\n";
+		}
+		else {
+			atlog.logfileonly("OK: ").logfileonly(modfile.realPath).logfileonly(" --> ").logfileonly(modfile.assetPath).logfileonly("\n");
 		}
 
 		/*

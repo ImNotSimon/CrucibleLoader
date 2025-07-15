@@ -12,6 +12,8 @@
 #include <iostream>
 #include <unordered_map>
 #include <set>
+#include <thread>
+#include <chrono>
 
 #ifndef _DEBUG
 #undef assert
@@ -56,50 +58,34 @@ void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r) {
 	char* decompBlob = nullptr;
 	size_t decompSize = 0;
 
-	std::filesystem::path declDir = outputDir / "rs_streamfile";
-	std::filesystem::path entityDir = outputDir / "entityDef";
-	std::filesystem::path fileResourceDir = outputDir / "file";
+	const std::set<std::string> validTypes = {"rs_streamfile", "entityDef", "file", "mapentities"};
 
 	for (uint64_t i = 0; i < r.header.numResources; i++) {
 		ResourceEntry& e = r.entries[i];
 		const char* typeString = nullptr, *nameString = nullptr;
 		Get_EntryStrings(r, e, typeString, nameString);
 
-
 		// Set output path based on file type
-		std::filesystem::path fileDir;
-		if(strcmp(typeString, "rs_streamfile") == 0) { // decls
-			
-			fileDir = declDir;
-		}
-		else if (strcmp(typeString, "entityDef") == 0) {
-			fileDir = entityDir;
-		}
-		else if(strcmp(typeString, "file") == 0) {
-			fileDir = fileResourceDir;
-		}
-		else {
+		if(validTypes.count(typeString) == 0)
 			continue;
+		fspath fileDir = outputDir / typeString;
+		fspath assetpath(nameString);
+
+		if (!assetpath.has_extension()) {
+			if(strcmp(typeString, "mapentities") == 0)
+				assetpath.replace_extension(".entities");
+			else assetpath.replace_extension(".decl");
 		}
 
-		std::filesystem::path archivePath(nameString);
-
-		if (!archivePath.has_extension()) {
-			archivePath.replace_extension(".decl");
+		if (assetpath.has_parent_path()) {
+			fileDir /= assetpath.parent_path();
 		}
 
-		if (archivePath.has_parent_path()) {
-			fileDir /= archivePath.parent_path();
-		}
-
-		if (std::filesystem::create_directories(fileDir)) {
-			// Errors thrown but directories are being created just fine
-			// Perhaps the issue is with calling this multiple times on the same directory?
-			//std::cout << "Directory Creation Failed " << fileDir << "\n";
-		}
+		// Normal for this to return false on success, for whatever reason
+		std::filesystem::create_directories(fileDir);
 
 		char* dataLocation = r.bufferData + (e.dataOffset - r.header.dataOffset);
-		std::ofstream outputFile(fileDir / archivePath.filename(), std::ios_base::binary);
+		std::ofstream outputFile(fileDir / assetpath.filename(), std::ios_base::binary);
 
 		switch(e.compMode) {
 			case 0: // No compression
@@ -115,7 +101,7 @@ void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r) {
 				}
 				bool success = Oodle::DecompressBuffer(dataLocation, e.dataSize, decompBlob, e.uncompressedSize);
 				if(!success)
-					std::cout << "Oodle Decompression Failed for " << (fileDir / archivePath.filename()) << "\n";
+					std::cout << "Oodle Decompression Failed for " << (fileDir / assetpath.filename()) << "\n";
 				outputFile.write(decompBlob, e.uncompressedSize);
 			}
 			break;
@@ -740,22 +726,40 @@ void Test_DumpPriorityManifest()
 /*
 * CONSOLIDATED RESOURCE EXTRACTOR FUNCTION
 */
-void Test_DumpConsolidatedFiles(fspath installFolder, fspath outputFolder) {
-	std::cout << "Dark Ages consolidated resource extractor by FlavorfulGecko5\n";
+void ExtractorMain(int argc, char* argv[]) {
+	/*
+	* REMEMBER TO UPDATE VERSION NUMBER
+	*/
+	std::cout << "Atlan Consolidated Resource Extractor v1 by FlavorfulGecko5\n";
 
-	if(!Oodle::init()) {
-		std::cout << "Failed to initialize Oodle Decompression Library! Terminating extraction process\n";
+	/*
+	* Get and verify command line arguments
+	*/
+	if (argc != 3) {
+		std::cout << "AtlanResourceExtractor.exe < Game Installation Folder > < Output Folder >\n";
+		return;
+	}
+	fspath installFolder = argv[1], outputFolder = argv[2];
+	if (!std::filesystem::is_directory(installFolder)) {
+		std::cout << "FATAL ERROR: " << installFolder << " is not a valid directory";
+		return;
+	}
+	if(!std::filesystem::is_directory(outputFolder)) {
+		std::cout << "FATAL ERROR: " << outputFolder << " is not a valid directory";
 		return;
 	}
 
-	// Setup Paths
-	outputFolder /= "geckoExporter";
+	/*
+	* Read and verify PackageMapSpec data
+	*/
+	outputFolder /= "atlanextractor";
 	fspath PathBase = installFolder / "base";
 	std::vector<std::string> packages = PackageMapSpec::GetPrioritizedArchiveList(installFolder);
 
 	if (packages.empty()) {
 		std::cout << "FATAL ERROR: Could not find PackageMapSpec.json\n";
 		std::cout << "Did you enter the correct path to your Dark Ages folder?";
+		return;
 	}
 	else {
 		std::cout << "Found DOOM The Dark Ages Folder\n";
@@ -763,12 +767,31 @@ void Test_DumpConsolidatedFiles(fspath installFolder, fspath outputFolder) {
 	}
 	std::filesystem::create_directories(outputFolder);
 
-	for (int i = (int)packages.size() - 1; i > -1; i--) {
-		//if(packages[i].name != "meta.resources")
-		//	continue;
-		//if(i <= packages.size() - 2) // Remove me later
-		//	return;
+	/*
+	* Download and load Oodle
+	* (Do it here so it doesn't get downloaded to the wrong folder if install folder is input wrong)
+	*/
+	const fspath oo2corepath = installFolder / "oo2core_9_win64.dll";
+	if(!std::filesystem::exists(oo2corepath)) {
+		// Because nobody ever needed a simple STL function to convert a string to a wide string....
+		#define OODLE_URL    "https://github.com/WorkingRobot/OodleUE/raw/refs/heads/main/Engine/Source/Programs/Shared/EpicGames.Oodle/Sdk/2.9.10/win/redist/oo2core_9_win64.dll"
+		#define OODLE_URL_W L"https://github.com/WorkingRobot/OodleUE/raw/refs/heads/main/Engine/Source/Programs/Shared/EpicGames.Oodle/Sdk/2.9.10/win/redist/oo2core_9_win64.dll"
+		atlog << "Downloading " << oo2corepath << " from " << OODLE_URL << "\n";
 
+		bool success = Oodle::Download(OODLE_URL_W, oo2corepath.wstring().c_str());
+		if (!success) {
+			atlog << "FATAL ERROR: Failed to download " << oo2corepath << "\n";
+			return;
+		}
+		atlog << "Download Complete (Oodle is a file decompression library)\n";
+	}
+	if (!Oodle::init(oo2corepath.string().c_str())) {
+		atlog << "FATAL ERROR: Failed to initialize " << oo2corepath << "\n";
+		return;
+	}
+
+	for (int i = (int)packages.size() - 1; i > -1; i--) {
+		
 		std::filesystem::path resPath = PathBase / packages[i];
 		std::cout << "Dumping: " << resPath.string() << "\n";
 
@@ -996,7 +1019,7 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 			runningDataOffset += 8 - runningDataOffset % 8;
 		}
 		else {
-			std::cout << "\nERROR: Unsupported resource type made it into build";
+			atlog << "\nERROR: Unsupported resource type made it into build";
 			return;
 		}
 	}
@@ -1060,7 +1083,7 @@ void RebuildContainerMask(const fspath metapath, const fspath newarchivepath) {
 	// A few checks to ensure everything is normal
 	assert(h->numResources == 1);
 	assert(h->dataOffset == e->dataOffset);
-	assert(e->compMode == 2);
+	//assert(e->compMode == 2); COULD CHANGE TO UNCOMPRESSED BETWEEN UPDATES
 	assert(e->defaultHash == e->dataCheckSum);
 
 	// TODO: If adding multiple archives, must do this for every archive
@@ -1075,11 +1098,18 @@ void RebuildContainerMask(const fspath metapath, const fspath newarchivepath) {
 	size_t extraSize = sizeof(uint64_t) + sizeof(uint32_t) + bitmasklongs * sizeof(uint64_t);
 
 	// Decompress the Oodle-compressed container mask
-	char* decomp = new char[e->uncompressedSize + extraSize]; 
-	if (!Oodle::DecompressBuffer(compressed, e->dataSize, decomp, e->uncompressedSize)) {
-		std::cout << "ERROR: FAILED TO DECOMPRESS CONTAINER MASK\n";
-		return;
+	char* decomp = new char[e->uncompressedSize + extraSize];
+	if (e->compMode == 2) {
+		if (!Oodle::DecompressBuffer(compressed, e->dataSize, decomp, e->uncompressedSize)) {
+			atlog << "ERROR: FAILED TO DECOMPRESS CONTAINER MASK\n";
+			return;
+		}
 	}
+	else {
+		assert(e->compMode == 0);
+		memcpy(decomp, compressed, e->dataSize);
+	}
+
 
 	// Important file offsets
 	uint32_t* hashCount = reinterpret_cast<uint32_t*>(decomp);
@@ -1161,7 +1191,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 		using namespace std::filesystem;
 
 		std::error_code lastCode;
-		//std::cout << "Managing backups and cleaning up previous injection files.\n";
+		//atlog << "Managing backups and cleaning up previous injection files.\n";
 
 		#define NUM_BACKUPS 2
 		const fspath backedupfiles[NUM_BACKUPS] = {pmspath, metapath};
@@ -1174,7 +1204,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 
 			// Ensure the original file exists
 			if (!exists(original)) {
-				std::cout << "ERROR: Could not find " << absolute(original);
+				atlog << "ERROR: Could not find " << absolute(original);
 				return;
 			}
 
@@ -1230,7 +1260,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 	}
 
 	if(argflags & argflag_resetvanilla) {
-		std::cout << "Uninstalled all mods\n";
+		atlog << "Uninstalled all mods\n";
 		return;
 	}
 
@@ -1258,13 +1288,13 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 				loosemodpaths.push_back(dirEntry.path());
 		}
 
-		//std::cout << "\nZipped Paths\n";
+		//atlog << "\nZipped Paths\n";
 		//for(const fspath& f : zipmodpaths)
-		//	std::cout << f << "\n";
-		//std::cout << "\nLoose Paths\n";
+		//	atlog << f << "\n";
+		//atlog << "\nLoose Paths\n";
 		//for(const fspath& f : loosemodpaths)
-		//	std::cout << f << "\n";
-		std::cout << "\nZipped Mods Found: " << zipmodpaths.size() << " Loose Mods Found: " << loosemodpaths.size() << "\n";
+		//	atlog << f << "\n";
+		atlog << "\nZipped Mods Found: " << zipmodpaths.size() << " Loose Mods Found: " << loosemodpaths.size() << "\n";
 	}
 	
 
@@ -1272,7 +1302,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 	* READ MOD DATA
 	*/
 
-	std::cout << "\n\nReading Mods:\n----------\n";
+	atlog << "\n\nReading Mods:\n----------\n";
 
 	int totalmods = static_cast<int>(zipmodpaths.size() + 1); // + 1 for the loose mod
 	ModDef* realmods = new ModDef[totalmods];
@@ -1288,7 +1318,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 	* priority version of every mod file. All mod file conflicts will be resolved here
 	* (conflicts from different mods, or from the same mods - in the case of bad aliasing setups)
 	*/
-	std::cout << "\n\nChecking for Conflicts:\n----------\n";
+	atlog << "\n\nChecking for Conflicts:\n----------\n";
 
 	std::vector<const ModFile*> supermod;
 	{
@@ -1308,7 +1338,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 				else {
 					bool replaceMapping = current.loadPriority < iter->second->parentMod->loadPriority;
 
-					std::cout << "CONFLICT FOUND: " << file.assetPath
+					atlog << "CONFLICT FOUND: " << file.assetPath
 						<< "\n(A):" << current.modName << " - " << file.realPath
 						<< "\n(B):" << iter->second->parentMod->modName << " - " << iter->second->realPath
 						<< "\nWinner: " << (replaceMapping ? "(A)\n" : "(B)\n---\n");
@@ -1336,7 +1366,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 		RebuildContainerMask(metapath, outarchivepath);
 	}
 	else {
-		std::cout << "\n\nNo mods will be loaded. All previously loaded mods are removed.\n";
+		atlog << "\n\nNo mods will be loaded. All previously loaded mods are removed.\n";
 	}
 
 	/*
@@ -1392,17 +1422,20 @@ void Test_ContainerMask() {
 
 void InjectorMain(int argc, char* argv[]) {
 
-	printf( R"(
+	atlog << R"(
 ----------------------------------------------
-Atlan Mod Loader v%d for DOOM: The Dark Ages
+Atlan Mod Loader v)" << MOD_LOADER_VERSION << R"( for DOOM: The Dark Ages
 By FlavorfulGecko5
 With Special Thanks to: Proteh, Zwip-Zwap-Zapony, Tjoener, and many other talented modders!
 https://github.com/FlavorfulGecko5/EntityAtlan/
 ----------------------------------------------
-)", MOD_LOADER_VERSION);
+)";
 
 	int argflags = 0;
-	fspath gamedirectory = "./";
+	
+	// Do not end in a / or there may be problems when running system commands 
+	// (it won't translate string literal slashes to the appropriate slash like it does when using the / operator)
+	fspath gamedirectory = "."; 
 
 	/*
 	* Parse Command Line Arguments
@@ -1411,17 +1444,17 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 		std::string_view arg = argv[i];
 
 		if(arg == "--verbose") {
-			std::cout << "ARGS: Verbose Logging Enabled\n";
+			atlog << "ARGS: Verbose Logging Enabled\n";
 			argflags |= argflag_verbose;
 		}
 
 		else if (arg == "--nolaunch") {
-			std::cout << "ARGS: Game will not launch after loading mods\n";
+			atlog << "ARGS: Game will not launch after loading mods\n";
 			argflags |= argflag_nolaunch;
 		}
 
 		else if (arg == "--forceload") {
-			std::cout << "ARGS: Mod loading will proceed if DarkAgesPatcher fails\n"
+			atlog << "ARGS: Mod loading will proceed if DarkAgesPatcher fails\n"
 				<< "WARNING: Loading mods when DarkAgesPatcher fails may cause the game to permanently crash on startup.\n"
 				<< "If this happens, you will need to unload all mods for the game to work again.\n"
 				<< "Press ENTER to acknowledge this warning.\n";
@@ -1433,12 +1466,12 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 			if(++i == argc)
 				goto LABEL_EXIT_HELP;
 			gamedirectory = argv[i];
-			std::cout << "ARGS: Custom game directory accepted\n";
+			atlog << "ARGS: Custom game directory accepted\n";
 		}
 
 		else {
 			LABEL_EXIT_HELP:
-			std::cout << "AtlanModLoader.exe [--verbose] [--nolaunch] [--forceload] [--gamedir <Dark Ages Installation Folder>]\n";
+			atlog << "AtlanModLoader.exe [--verbose] [--nolaunch] [--forceload] [--gamedir <Dark Ages Installation Folder>]\n";
 			return;
 		}
 	}
@@ -1456,7 +1489,7 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 
 	/* Check the game directory is valid */
 	if (!std::filesystem::exists(gamedirectory) || !std::filesystem::is_directory(gamedirectory)) {
-		std::cout << "FATAL ERROR: " << gamedirectory << " is not a valid directory";
+		atlog << "FATAL ERROR: " << gamedirectory << " is not a valid directory";
 		return;
 	}
 
@@ -1472,7 +1505,7 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 			cachereader.read(reinterpret_cast<char*>(&loadercache), sizeof(LoaderCache_t));
 		}
 		else {
-			std::cout << "WARNING: Corrupted Mod Loader Cache file detected. Falling back to defaults\n";
+			atlog << "WARNING: Corrupted Mod Loader Cache file detected. Falling back to defaults\n";
 		}
 		cachereader.close();
 	}
@@ -1483,7 +1516,7 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 	*/
 	{
 		if (!std::filesystem::exists(manifestpath)) {
-			std::cout << "FATAL ERROR: Could not find " << manifestpath << "\n";
+			atlog << "FATAL ERROR: Could not find " << manifestpath << "\n";
 			return;
 		}
 		std::ifstream manreader(manifestpath, std::ios_base::binary);
@@ -1501,20 +1534,20 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 	*/
 
 	if(!std::filesystem::exists(oo2corepath)) {
-		#define OODLE_URL L"https://github.com/WorkingRobot/OodleUE/raw/refs/heads/main/Engine/Source/Programs/Shared/EpicGames.Oodle/Sdk/2.9.10/win/redist/oo2core_9_win64.dll"
-		std::cout << "Downloading " << oo2corepath << " from ";
-		std::wcout << OODLE_URL;
-		std::cout << "\n";
+		// Because nobody ever needed a simple STL function to convert a string to a wide string....
+		#define OODLE_URL    "https://github.com/WorkingRobot/OodleUE/raw/refs/heads/main/Engine/Source/Programs/Shared/EpicGames.Oodle/Sdk/2.9.10/win/redist/oo2core_9_win64.dll"
+		#define OODLE_URL_W L"https://github.com/WorkingRobot/OodleUE/raw/refs/heads/main/Engine/Source/Programs/Shared/EpicGames.Oodle/Sdk/2.9.10/win/redist/oo2core_9_win64.dll"
+		atlog << "Downloading " << oo2corepath << " from " << OODLE_URL << "\n";
 
-		bool success = Oodle::Download(OODLE_URL, oo2corepath.wstring().c_str());
+		bool success = Oodle::Download(OODLE_URL_W, oo2corepath.wstring().c_str());
 		if (!success) {
-			std::cout << "FATAL ERROR: Failed to download " << oo2corepath << "\n";
+			atlog << "FATAL ERROR: Failed to download " << oo2corepath << "\n";
 			return;
 		}
-		std::cout << "Download Complete (Oodle is a file decompression library)\n";
+		atlog << "Download Complete (Oodle is a file decompression library)\n";
 	}
 	if (!Oodle::init()) {
-		std::cout << "FATAL ERROR: Failed to initialize " << oo2corepath << "\n";
+		atlog << "FATAL ERROR: Failed to initialize " << oo2corepath << "\n";
 		return;
 	}
 
@@ -1522,7 +1555,7 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 	bool gameUpdated = newcache.manifesthash != loadercache.manifesthash;
 	if (gameUpdated) {
 		argflags |= argflag_gameupdated;
-		std::cout << "Game has been updated, or mod loader cache file could not be found. Performing update operations\n";
+		atlog << "Game has been updated, or mod loader cache file could not be found. Performing update operations\n";
 	}
 
 	bool runPatcher = gameUpdated || loadercache.patchersucceeded == 0;
@@ -1532,16 +1565,18 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 	*/
 	if(runPatcher)
 	{
+		// Do not put slashes in any string literals here
 		const fspath patcherpath = gamedirectory / "DarkAgesPatcher.exe";
 		const fspath exepath = gamedirectory / "DOOMTheDarkAges.exe";
 
-		std::cout << "\nRunning DarkAgesPatcher.exe by Proteh\n";
+		atlog << "\nRunning DarkAgesPatcher.exe by Proteh\n";
 		if(!std::filesystem::exists(patcherpath))
 		{
-			std::cout << "FATAL ERROR: Could not find " << patcherpath << "\n";
+			atlog << "FATAL ERROR: Could not find " << patcherpath << "\n";
 			return;
 		}
 
+		//atlog << "~" << patcherpath << "~" << exepath << "~\n";
 		std::string updateCommand = patcherpath.string() + " --update";
 		std::string patchCommand = patcherpath.string() + " --patch ";
 		patchCommand.append(exepath.string());
@@ -1552,7 +1587,7 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 			uint8_t failedpatches;
 		} returndata;
 
-		//std::cout << patchCommand;
+		//atlog << patchCommand;
 		system(updateCommand.c_str());
 		*reinterpret_cast<int*>(&returndata) = system(patchCommand.c_str());
 
@@ -1571,17 +1606,17 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 			break;
 		}
 
-		std::cout << "Patcher Return Codes: " << returndata.code << " " << (int)returndata.successfulpatches << " " << (int)returndata.failedpatches << "\n";
+		atlog << "Patcher Return Codes: " << returndata.code << " " << returndata.successfulpatches << " " << returndata.failedpatches << "\n";
 		if (!patchsuccess) {
 			
-			std::cout << "ERROR: Dark Ages Patcher partially or fully failed to patch your game executable.\n";
+			atlog << "ERROR: Dark Ages Patcher partially or fully failed to patch your game executable.\n";
 
 			if(argflags & argflag_forceload) {
-				std::cout << "Proceeding with mod loading due to --forceload\n";
+				atlog << "Proceeding with mod loading due to --forceload\n";
 			}
 			else {
 				// Should be fine to abort right here without saving the cache file - like this injection attempt never happened
-				std::cout << "Loading mods when DarkAgesPatcher fails may cause the game to permanently crash on startup.\n"
+				atlog << "Loading mods when DarkAgesPatcher fails may cause the game to permanently crash on startup.\n"
 					<< "Mod loading is being aborted out of caution.\n"
 					<< "At your own risk, you may run the mod loader with --forceload to bypass this safety measure.\n";
 				return;
@@ -1612,21 +1647,21 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 	/*
 	* Finish up
 	*/
-	std::cout << "\nMod Loading Complete\n----------\n";
+	atlog << "\nMod Loading Complete\n----------\n";
 
 	if (argflags & argflag_nolaunch) {
-		std::cout << "Game will not launch due to nolaunch argument\n";
+		atlog << "Game will not launch due to nolaunch argument\n";
 		return;
 	}
 
 	const fspath absdir = std::filesystem::absolute(gamedirectory);
 
 	if (absdir.string().find("steamapps") != std::string_view::npos) {
-		std::cout << "Launching Game with Steam\n";
+		atlog << "Launching Game with Steam\n";
 		std::system("start \"\" \"steam://run/3017860//\"");
 	}
 	else {
-		std::cout << "Could not determine how to automatically launch your game\n"
+		atlog << "Could not determine how to automatically launch your game\n"
 			<< "Please launch it manually.\n";
 	}
 	
@@ -1634,15 +1669,37 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 
 int main(int argc, char* argv[]) {
 
-	#define AtlanModLoader 1 
-	#define AtlanExtractor 0
+	#define LOGPATH "modloader_log.txt"
+	#define AtlanModLoader 0 
+	#define AtlanExtractor 1
 
-	#if AtlanModLoader
-	InjectorMain(argc, argv);
-	#elif AtlanExtractor
+	try {
+		#if AtlanModLoader
+		AtlanLogger::init(LOGPATH);
+		InjectorMain(argc, argv);
+		#elif AtlanExtractor
+		ExtractorMain(argc, argv);
+		return 0;
+		#endif
+	}
+	catch (std::exception e) {
+		atlog << "\n\nFATAL ERROR: An unexpected crash has occurred\n"
+			<< "This sudden crash may have left you with broken game files.\n"
+			<< "Please re-run the mod loader with no mods loaded to restore them\n"
+			<< "Or use \"Restore Backups\" in Dark Ages Mod Manager\n"
+			<< "Error Message: " << e.what();
+	}
+	
+	atlog << "\n\nThis window will close in 15 seconds\n";
+	std::cout << "Output written to " << LOGPATH << "\n";
+	AtlanLogger::exit();
+
+	#ifndef _DEBUG
+	std::this_thread::sleep_for(std::chrono::seconds(15));
 	#endif
-
 }
+
+
 
 //int main(int argc, char* argv[]) {
 //	#ifdef DOOMETERNAL

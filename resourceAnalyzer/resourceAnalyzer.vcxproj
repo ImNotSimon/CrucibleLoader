@@ -151,6 +151,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\GlobalConfig.cpp" />
     <ClCompile Include="src\ModReader.cpp" />
     <ClCompile Include="src\PackageMapSpec.cpp" />
     <ClCompile Include="src\resourceMain.cpp" />

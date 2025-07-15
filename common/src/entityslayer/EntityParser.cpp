@@ -663,7 +663,7 @@ void EntityParser::parseContentsPermissive()
 		* [DONE] 6. [Identifier/String] [Identifier/Value]
 		* [DONE] 7. [Identifier/String] [Identifier/Value] { }
 		*/
-		case TT_Identifier: case TT_String:
+		case TT_Identifier: case TT_String: case TT_Number:
 		activeID = lastUniqueToken;
 		Tokenize();
 
@@ -674,10 +674,45 @@ void EntityParser::parseContentsPermissive()
 			goto LABEL_LOOP;
 		}
 
+		// Permit braces to run onto newlines
+		else if (lastTokenType == TT_Newline) {
+			do {
+				Tokenize();
+			}
+			while(lastTokenType == TT_Newline);
+
+			if (lastTokenType == TT_BraceOpen) {
+				pushNode(EntNode::NFC_ObjSimple, activeID);
+				parseContentsPermissive();
+				assertLastType(TT_BraceClose);
+				goto LABEL_LOOP;
+			}
+
+			else {
+				pushNode(EntNode::NFC_ValueLayer, activeID);
+				goto LABEL_LOOP_SKIP_TOKENIZE;
+			}
+		}
+
 		else if (lastTokenType == TT_EqualSign) {
 			Tokenize();
 
 			if (lastTokenType == TT_BraceOpen) { // Common Objects
+				pushNode(EntNode::NFC_ObjCommon, activeID);
+				parseContentsPermissive();
+				assertLastType(TT_BraceClose);
+				goto LABEL_LOOP;
+			}
+			
+			else if (lastTokenType == TT_Newline) {
+				do { 
+					Tokenize();
+				}
+				while(lastTokenType == TT_Newline);
+
+				if(lastTokenType != TT_BraceOpen)
+					throw Error("Expected brace after = and newline");
+
 				pushNode(EntNode::NFC_ObjCommon, activeID);
 				parseContentsPermissive();
 				assertLastType(TT_BraceClose);
@@ -701,14 +736,14 @@ void EntityParser::parseContentsPermissive()
 			pushNodeBoth(EntNode::NFC_ValueFile);
 			Tokenize();
 			if (lastTokenType == TT_BraceOpen) {
-				tempChildren.back()->nodeFlags = EntNode::NFC_ObjSimple;
+				tempChildren.back()->nodeFlags = EntNode::NFC_ObjSimple; // Changed from ObjEntityDef to fix indentation
 				parseContentsPermissive();
 				assertLastType(TT_BraceClose);
 				goto LABEL_LOOP;
 			}
 			else goto LABEL_LOOP_SKIP_TOKENIZE;
 		}
-		else if (lastTokenType != TT_Semicolon) { // EOF, Braceclose, newline, comment
+		else if (lastTokenType != TT_Semicolon) { // EOF, Braceclose, comment
 			pushNode(EntNode::NFC_ValueLayer, activeID);
 			goto LABEL_LOOP_SKIP_TOKENIZE;
 		}

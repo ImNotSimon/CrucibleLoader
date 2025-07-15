@@ -125,6 +125,10 @@ std::vector<std::string> PackageMapSpec::GetPrioritizedArchiveList(const fspath 
 			assert(&name != EntNode::SEARCH_404);
 
 			std::string_view nameString = name.getValueUQ();
+			if (nameString.find("modarchives") != std::string::npos) {
+				std::cout << "PackageMapSpec: Ignoring mod archive " << nameString << "\n";
+				continue;
+			}
 
 			// All of this...because the C++ 17 STL doesn't have EndsWith
 			std::string_view extString = ".resources";
