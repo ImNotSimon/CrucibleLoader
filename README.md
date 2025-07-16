@@ -3,7 +3,7 @@
 A collection of modding tools for id Software's DOOM: The Dark Ages. Official releases and explanations for every available tool can be found on the [Releases Page](https://github.com/FlavorfulGecko5/EntityAtlan/releases)
 
 ## Atlan Mod Loader
-An entirely new mod loader with vast improvements over the DOOM Eternal mod loader. Available on the [https://github.com/FlavorfulGecko5/EntityAtlan/releases]()
+An entirely new mod loader with vast improvements over the DOOM Eternal mod loader. Available on the [Releases Page](https://github.com/FlavorfulGecko5/EntityAtlan/releases)
 
 ## Atlan Resource Extractor
 

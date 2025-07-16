@@ -51,7 +51,7 @@ For example: `rs_streamfile/generated/decls/strings/ui/mainmenu/a/b/c/somestring
 You can also mix and match! Have a folder named `rs_streamfile@generated@decls@strings` and name your file `ui@mainmenu@a@b@c@somestring.decl`. Find a setup and style most convenient for you!
 
 ### Example Zip
-To illustrate these new convenience features, I've uploaded a sample mod zip. Download it and check out the power at your fingertips!
+To illustrate these new convenience features, I've uploaded a [sample mod zip.](https://github.com/FlavorfulGecko5/EntityAtlan/blob/master/documentation/Example_Mod.zip) Download it and check out the power at your fingertips!
 
 
 
