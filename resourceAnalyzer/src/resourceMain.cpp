@@ -58,7 +58,7 @@ void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r) {
 	char* decompBlob = nullptr;
 	size_t decompSize = 0;
 
-	const std::set<std::string> validTypes = {"rs_streamfile", "entityDef", "file", "mapentities"};
+	const std::set<std::string> validTypes = {"rs_streamfile", "entityDef", "file", "mapentities", "binarymd6def", "logicEntity" };
 
 	for (uint64_t i = 0; i < r.header.numResources; i++) {
 		ResourceEntry& e = r.entries[i];
@@ -88,10 +88,12 @@ void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r) {
 		std::ofstream outputFile(fileDir / assetpath.filename(), std::ios_base::binary);
 
 		switch(e.compMode) {
-			case 0: // No compression
+			case 0:
 			outputFile.write(dataLocation, e.dataSize);
 			break;
 
+			case 4:
+			dataLocation += 12;
 			case 2:
 			{
 				if(decompSize < e.uncompressedSize) {
@@ -99,7 +101,7 @@ void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r) {
 					decompBlob = new char[e.uncompressedSize];
 					decompSize = e.uncompressedSize;
 				}
-				bool success = Oodle::DecompressBuffer(dataLocation, e.dataSize, decompBlob, e.uncompressedSize);
+				bool success = Oodle::DecompressBuffer(dataLocation, e.dataSize - (e.compMode == 4 ? 12 : 0), decompBlob, e.uncompressedSize);
 				if(!success)
 					std::cout << "Oodle Decompression Failed for " << (fileDir / assetpath.filename()) << "\n";
 				outputFile.write(decompBlob, e.uncompressedSize);
@@ -730,7 +732,7 @@ void ExtractorMain(int argc, char* argv[]) {
 	/*
 	* REMEMBER TO UPDATE VERSION NUMBER
 	*/
-	std::cout << "Atlan Consolidated Resource Extractor v1 by FlavorfulGecko5\n";
+	std::cout << "Atlan Consolidated Resource Extractor v1.1 by FlavorfulGecko5\n";
 
 	/*
 	* Get and verify command line arguments
@@ -1216,7 +1218,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 			else {
 				// The game updated, and the file isn't modded. This means either:
 				// 1. An updated version was downloaded
-				// 2. The file wasn't updated, but is still vanilla
+				// 2. meThe file wasn't updated, but is still vanilla
 				// Either way, replace the original backup with this new version
 				if ((argflags & argflag_gameupdated) && !IsModded[i]) {
 					copy_file(original, backup, copy_options::overwrite_existing, lastCode);
@@ -1669,8 +1671,8 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 int main(int argc, char* argv[]) {
 
 	#define LOGPATH "modloader_log.txt"
-	#define AtlanModLoader 1 
-	#define AtlanExtractor 0
+	#define AtlanModLoader 0 
+	#define AtlanExtractor 1
 
 	try {
 		#if AtlanModLoader
