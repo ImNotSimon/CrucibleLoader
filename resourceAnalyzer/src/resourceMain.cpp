@@ -1655,8 +1655,7 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 	}
 
 	const fspath absdir = std::filesystem::absolute(gamedirectory);
-
-	if (absdir.string().find("steamapps") != std::string_view::npos) {
+	if(std::filesystem::exists(gamedirectory / "steam_api64.dll")) {
 		atlog << "Launching Game with Steam\n";
 		std::system("start \"\" \"steam://run/3017860//\"");
 	}
@@ -1670,8 +1669,8 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 int main(int argc, char* argv[]) {
 
 	#define LOGPATH "modloader_log.txt"
-	#define AtlanModLoader 0 
-	#define AtlanExtractor 1
+	#define AtlanModLoader 1 
+	#define AtlanExtractor 0
 
 	try {
 		#if AtlanModLoader
@@ -1690,12 +1689,12 @@ int main(int argc, char* argv[]) {
 			<< "Error Message: " << e.what();
 	}
 	
-	atlog << "\n\nThis window will close in 15 seconds\n";
+	atlog << "\n\nThis window will close in 10 seconds\n";
 	std::cout << "Output written to " << LOGPATH << "\n";
 	AtlanLogger::exit();
 
 	#ifndef _DEBUG
-	std::this_thread::sleep_for(std::chrono::seconds(15));
+	std::this_thread::sleep_for(std::chrono::seconds(10));
 	#endif
 }
 
