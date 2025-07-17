@@ -8,6 +8,11 @@ deserializer/bin/*
 reflector/bin/*
 input/*
 
+oo2core_9_win64.dll
+modloader_log.txt
+modloader_cache.bin
+DarkAgesPatcher.def
+
 # Do not include 90 thousand line reflection files in the repository....
 deserializer/src/generated/*
 

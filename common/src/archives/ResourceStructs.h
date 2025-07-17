@@ -1,4 +1,7 @@
 #pragma once
+#include <filesystem>
+
+typedef std::filesystem::path fspath;
 
 //#define DOOMETERNAL
 
@@ -126,3 +129,23 @@ struct ResourceArchive {
 		delete[] stringIndex;
 	}
 };
+
+struct containerMaskEntry_t {
+	uint64_t hash;
+	uint64_t numResources;
+};
+
+containerMaskEntry_t GetContainerMaskHash(const fspath archivepath);
+
+void Audit_ResourceHeader(const ResourceHeader& h);
+void Audit_ResourceArchive(const ResourceArchive& r);
+
+enum ResourceFlags {
+	RF_ReadEverything = 0,
+	RF_SkipData = 1 << 0,
+	RF_HeaderOnly = 1 << 1
+};
+
+void Read_ResourceArchive(ResourceArchive& r, const fspath pathString, int flags);
+
+void Get_EntryStrings(const ResourceArchive& r, const ResourceEntry& e, const char*& typeString, const char*& nameString);

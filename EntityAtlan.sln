@@ -26,6 +26,16 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "resourceAnalyzer", "resourc
 		{31BD7844-9C32-4F72-98CB-6E61D74A2828} = {31BD7844-9C32-4F72-98CB-6E61D74A2828}
 	EndProjectSection
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AtlanModLoader", "AtlanModLoader\AtlanModLoader.vcxproj", "{48F0AF33-335E-48E2-A104-77CBDE681F3D}"
+	ProjectSection(ProjectDependencies) = postProject
+		{31BD7844-9C32-4F72-98CB-6E61D74A2828} = {31BD7844-9C32-4F72-98CB-6E61D74A2828}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AtlanResourceExtractor", "AtlanResourceExtractor\AtlanResourceExtractor.vcxproj", "{5DE22C8D-38B0-4041-BC0D-AF9751E35DA4}"
+	ProjectSection(ProjectDependencies) = postProject
+		{31BD7844-9C32-4F72-98CB-6E61D74A2828} = {31BD7844-9C32-4F72-98CB-6E61D74A2828}
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -74,6 +84,22 @@ Global
 		{C96B3154-753C-41B7-901B-5D3889A0AAA2}.Release|x64.Build.0 = Release|x64
 		{C96B3154-753C-41B7-901B-5D3889A0AAA2}.Release|x86.ActiveCfg = Release|Win32
 		{C96B3154-753C-41B7-901B-5D3889A0AAA2}.Release|x86.Build.0 = Release|Win32
+		{48F0AF33-335E-48E2-A104-77CBDE681F3D}.Debug|x64.ActiveCfg = Debug|x64
+		{48F0AF33-335E-48E2-A104-77CBDE681F3D}.Debug|x64.Build.0 = Debug|x64
+		{48F0AF33-335E-48E2-A104-77CBDE681F3D}.Debug|x86.ActiveCfg = Debug|Win32
+		{48F0AF33-335E-48E2-A104-77CBDE681F3D}.Debug|x86.Build.0 = Debug|Win32
+		{48F0AF33-335E-48E2-A104-77CBDE681F3D}.Release|x64.ActiveCfg = Release|x64
+		{48F0AF33-335E-48E2-A104-77CBDE681F3D}.Release|x64.Build.0 = Release|x64
+		{48F0AF33-335E-48E2-A104-77CBDE681F3D}.Release|x86.ActiveCfg = Release|Win32
+		{48F0AF33-335E-48E2-A104-77CBDE681F3D}.Release|x86.Build.0 = Release|Win32
+		{5DE22C8D-38B0-4041-BC0D-AF9751E35DA4}.Debug|x64.ActiveCfg = Debug|x64
+		{5DE22C8D-38B0-4041-BC0D-AF9751E35DA4}.Debug|x64.Build.0 = Debug|x64
+		{5DE22C8D-38B0-4041-BC0D-AF9751E35DA4}.Debug|x86.ActiveCfg = Debug|Win32
+		{5DE22C8D-38B0-4041-BC0D-AF9751E35DA4}.Debug|x86.Build.0 = Debug|Win32
+		{5DE22C8D-38B0-4041-BC0D-AF9751E35DA4}.Release|x64.ActiveCfg = Release|x64
+		{5DE22C8D-38B0-4041-BC0D-AF9751E35DA4}.Release|x64.Build.0 = Release|x64
+		{5DE22C8D-38B0-4041-BC0D-AF9751E35DA4}.Release|x86.ActiveCfg = Release|Win32
+		{5DE22C8D-38B0-4041-BC0D-AF9751E35DA4}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

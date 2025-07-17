@@ -45,6 +45,12 @@
     <ClCompile Include="src\miniz\miniz.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\archives\PackageMapSpec.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\archives\ResourceStructs.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\entityslayer\EntityLogger.h">
@@ -72,6 +78,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\miniz\miniz.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\archives\PackageMapSpec.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\archives\ResourceStructs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

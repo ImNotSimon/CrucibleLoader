@@ -24,6 +24,7 @@
     <ProjectGuid>{c96b3154-753c-41b7-901b-5d3889a0aaa2}</ProjectGuid>
     <RootNamespace>resourceAnalyzer</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>resourceAnalyzer</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -151,21 +152,12 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\GlobalConfig.cpp" />
-    <ClCompile Include="src\ModReader.cpp" />
-    <ClCompile Include="src\PackageMapSpec.cpp" />
     <ClCompile Include="src\resourceMain.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\common\common.vcxproj">
       <Project>{31bd7844-9c32-4f72-98cb-6e61d74a2828}</Project>
     </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="src\GlobalConfig.h" />
-    <ClInclude Include="src\ModReader.h" />
-    <ClInclude Include="src\PackageMapSpec.h" />
-    <ClInclude Include="src\ResourceStructs.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
