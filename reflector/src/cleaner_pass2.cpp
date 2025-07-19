@@ -84,6 +84,7 @@ class idlibCleaner2
 	void CheckInheritance(std::string_view type);
 	int IncludeDescendantsOf(std::string_view parentName);
 	void RecurseTemplates();
+	bool RecurseTemplates_idList(EntNode& listnode, bool force);
 	void ApplyManualSettings();
 
 
@@ -216,9 +217,49 @@ void idlibCleaner2::CountReferences(EntNode& typelist)
 * - May need to add special exemption for idList variables
 */
 
+bool idlibCleaner2::RecurseTemplates_idList(EntNode& list, bool force) {
+	// Skip idLists which are not included
+	auto iter = typelib.find(std::string(list.getName()));
+	assert(iter != typelib.end());
+	if (iter->second.referenceCount == 0 && !iter->second.forceInlude && !force)
+		return false;
+
+	// Get the parent idListBase
+	EntNode& basename = list["parentName"];
+	iter = typelib.find(std::string(basename.getValue()));
+	assert(iter != typelib.end());
+
+	// Get the type stored by the list
+	EntNode& baselist = *iter->second.node;
+	EntNode& listtype = *baselist["values"].ChildAt(0);
+	assert(listtype.getValue() == "list");
+	assert(&listtype["array"] == EntNode::SEARCH_404);
+
+	bool mustInclude;
+	{
+		std::string_view pointerCount = listtype["pointers"].getValue();
+		assert(pointerCount.length() == 1);
+		mustInclude = pointerCount[0] == '1';
+	}
+
+	if (mustInclude) {
+		iter = typelib.find(std::string(listtype.getName()));
+		assert(iter != typelib.end());
+
+		if (!iter->second.forceInlude) {
+			iter->second.forceInlude = true;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 void idlibCleaner2::RecurseTemplates() {
 	EntNode& templates = (*parser.getRoot())["templates"];
 	printf("Executing RecurseTemplates\n");
+
+	bool includedThisRun = false;
 	
 	// idListBase variables have no tags. 
 	// We must forcibly iterate over the list variable's type and include it if missing
@@ -226,46 +267,36 @@ void idlibCleaner2::RecurseTemplates() {
 	// that are included
 	EntNode& idLists = templates["idList"];
 	assert(&idLists != EntNode::SEARCH_404);
-
-	bool includedThisRun = false;
-
 	for (int i = 0, max = idLists.getChildCount(); i < max; i++) {
 		EntNode& list = *idLists.ChildAt(i);
 
+		if(RecurseTemplates_idList(list, false))
+			includedThisRun = true;
+	}
+
+	EntNode& idLogicLists = templates["idLogicList"];
+	assert(&idLogicLists != EntNode::SEARCH_404);
+	for (int i = 0, max = idLogicLists.getChildCount(); i < max; i++) {
+		EntNode& logiclist = *idLogicLists.ChildAt(i);
+
 		// Skip idLists which are not included
-		auto iter = typelib.find(std::string(list.getName()));
+		auto iter = typelib.find(std::string(logiclist.getName()));
 		assert(iter != typelib.end());
-		if(iter->second.referenceCount == 0 && !iter->second.forceInlude)
+		if (iter->second.referenceCount == 0 && !iter->second.forceInlude)
 			continue;
 
 		// Get the parent idListBase
-		EntNode& basename = list["parentName"];
+		EntNode& basename = logiclist["parentName"];
 		iter = typelib.find(std::string(basename.getValue()));
 		assert(iter != typelib.end());
+		EntNode& list = *iter->second.node;
 
-		// Get the type stored by the list
-		EntNode& baselist = *iter->second.node;
-		EntNode& listtype = *baselist["values"].ChildAt(0);
-		assert(listtype.getValue() == "list");
-		assert(&listtype["array"] == EntNode::SEARCH_404);
-		
-		bool mustInclude;
-		{
-			std::string_view pointerCount = listtype["pointers"].getValue();
-			assert(pointerCount.length() == 1);
-			mustInclude = pointerCount[0] == '1';
+		if (RecurseTemplates_idList(list, true)) {
+			includedThisRun = true;
 		}
-
-		if (mustInclude) {
-			iter = typelib.find(std::string(listtype.getName()));
-			assert(iter != typelib.end());
-
-			if (!iter->second.forceInlude) {
-				iter->second.forceInlude = true;
-				includedThisRun = true;
-			}
-		}
+			
 	}
+
 
 	EntNode& idStaticLists = templates["idStaticList"];
 	assert(&idStaticLists != EntNode::SEARCH_404);
@@ -345,6 +376,11 @@ void idlibCleaner2::RecurseTemplates() {
 	// Also, this probably only needs to run once - should monitor and see
 	int childrenIncludes = IncludeDescendantsOf("idLogicVariableModel");
 	childrenIncludes += IncludeDescendantsOf("idTriggerBodyData");
+	childrenIncludes += IncludeDescendantsOf("idTransportComponent");
+	childrenIncludes += IncludeDescendantsOf("idEntityModifier_AI_Buff");
+	childrenIncludes += IncludeDescendantsOf("idPhysicsEditorConstraintDef");
+	childrenIncludes += IncludeDescendantsOf("idCollision_Animated");
+	childrenIncludes += IncludeDescendantsOf("idAICondition");
 
 	//printf("In looping hell\n");
 	//EntNode& idTypeInfoObjectPtrs = templates["idTypeInfoObjectPtr"];

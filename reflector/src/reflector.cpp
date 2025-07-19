@@ -33,7 +33,8 @@ class idlibReflector {
         {"idTypeInfoObjectPtr", &idlibReflector::GenerateidTypeInfoObjectPtr},
         {"idTypesafeNumber", &idlibReflector::GenerateidTypesafeNumber},
         {"idManagedClassPtr", &idlibReflector::GenerateidManagedClassPtr},
-        {"idLogicEntityPtr", &idlibReflector::GenerateidLogicEntityPtr}
+        {"idLogicEntityPtr", &idlibReflector::GenerateidLogicEntityPtr},
+        {"idLogicList", &idlibReflector::GenerateidLogicList},
     };
 
 
@@ -242,6 +243,15 @@ class idlibReflector {
         assert(0);
     }
 
+    void GenerateidLogicList(EntNode& typenode) {
+        /* idLogicLists are children of idLists */
+        EntNode& parentName = typenode["parentName"];
+        auto iter = typelib.find(std::string(parentName.getValue()));
+        assert(iter != typelib.end());
+        EntNode& parentNode = *iter->second;
+        GenerateidList(parentNode);
+    }
+
     void GenerateidStaticList(EntNode& typenode) {
         // The first value in idListBase is what the list stores
         EntNode& listType = *typenode["values"].ChildAt(0);
@@ -331,10 +341,7 @@ class idlibReflector {
     }
 
     void GenerateidManagedClassPtr(EntNode& typenode) {
-        // TODO: Monitor - Not actually sure if these are typeinfo
-        // since these are all 0 in the entitydef
-
-        descpp.append("\tds_idTypeInfoPtr(reader, writeTo);\n");
+        descpp.append("\tds_idStr(reader, writeTo);\n");
     }
 
     void GenerateidLogicEntityPtr(EntNode& typenode) {

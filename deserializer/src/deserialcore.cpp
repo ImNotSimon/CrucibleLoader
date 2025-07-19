@@ -8,11 +8,16 @@
 #define assert(OP) (OP)
 #endif
 
+// Built before deserialization begins
+std::unordered_map<uint64_t, std::string> deserial::declHashMap;
+std::unordered_map<uint64_t, entityclass_t> deserial::entityclassmap;
+
 // Used for stack tracing
 thread_local std::vector<std::string_view> propertyStack;
 thread_local deserialTypeInfo lastAccessedTypeInfo;
 thread_local int warningCount = 0;
 thread_local int fileCount = 0;
+thread_local const void* fileStartAddress = nullptr; // For debugger view
 
 void LogWarning(std::string_view msg) {
 	std::string propString;
@@ -66,22 +71,39 @@ void deserializer::Exec(BinaryReader& reader, std::string& writeTo) const {
 	propertyStack.pop_back();
 }
 
-void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo)
+#pragma pack(push, 1)
+struct inherithash_t {
+	uint8_t leaf = 1;
+	uint32_t length = 8;
+	uint64_t hash = 0;
+};
+#pragma pack(pop)
+
+void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo, uint32_t entityClass)
 {
 	lastAccessedTypeInfo = {nullptr, nullptr};
+	fileStartAddress = (const void*)reader.GetBuffer();
 
 	#define HASH_EDIT 0xC2D0B77C0D10391CUL
 
 	uint8_t bytecode;
 	uint32_t length;
-	uint64_t inherits;
+	inherithash_t inherit;
 	uint64_t editHash;
-
+	
 	assert(reader.ReadLE(bytecode));
 	assert(bytecode == 0);
 	assert(reader.ReadLE(length));
 	assert(length == reader.GetRemaining());
-	assert(reader.ReadLE(inherits));
+	
+	// Read the inheritance hash
+	assert(reader.ReadLE(inherit.hash));
+	if(inherit.hash != 0)
+	{
+		const deserializer inheritVar = { &ds_pointerdecl, "inherit", 0 };
+		BinaryReader inheritReader(reinterpret_cast<char*>(&inherit), sizeof(inherithash_t));
+		inheritVar.Exec(inheritReader, writeTo);
+	}
 
 	// In map entities this byte is 0
 	assert(reader.ReadLE(bytecode));
@@ -129,9 +151,14 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo)
 		}
 	}
 
-	// TODO: If the class is not explicitly defined, look it up via an entityDef mapping
-	if(lastAccessedTypeInfo.callback == nullptr)
-		return;
+	// If the class is not explicitly defined, look it up
+	// TODO: Must insert class string into the text block manually if this is the case
+	if (lastAccessedTypeInfo.callback == nullptr) {
+		auto typeiter = typeInfoPtrMap.find(entityClass);
+		assert(typeiter != typeInfoPtrMap.end());
+		lastAccessedTypeInfo = typeiter->second;
+	}
+		
 
 	fileCount++;
 	// Block #3 - Unpadded Wrapper --> Serialization Hash --> Edit Block
@@ -192,11 +219,18 @@ void deserial::ds_pointerdecl(BinaryReader& reader, std::string& writeTo)
 	uint64_t hash;
 	assert(reader.ReadLE(hash));
 
+	if (hash == 0) {
+		writeTo.append("NULL;\n");
+		return;
+	}
+
+	const auto& iter = declHashMap.find(hash);
+
 	// Todo: Generate a map of hashes to decl filepaths that includes camelcased type
 	// Query this map, append the filepath
 	writeTo.push_back('"');
-	if (true) { // TEMPORARY
-		writeTo.append(std::to_string(hash));
+	if (iter != declHashMap.end()) {
+		writeTo.append(iter->second);
 	}
 	else {
 		char hashString[9];
