@@ -1,6 +1,7 @@
 #include "deserialcore.h"
 #include "generated/deserialgenerated.h"
 #include "io/BinaryReader.h"
+#include <set>
 #include <cassert>
 
 #ifndef _DEBUG
@@ -8,9 +9,35 @@
 #define assert(OP) (OP)
 #endif
 
+DeserialMode deserialmode = DeserialMode::entitydef;
+
+void deserial::SetDeserialMode(DeserialMode newmode)
+{
+	deserialmode = newmode;
+}
+
 // Built before deserialization begins
 std::unordered_map<uint64_t, std::string> deserial::declHashMap;
+std::unordered_map<uint64_t, std::string> deserial::modelHashMap;
 std::unordered_map<uint64_t, entityclass_t> deserial::entityclassmap;
+
+// Built during deserialization
+// Strings follow the format of:
+// property/stack/trace/entityfarmhash
+std::unordered_map<std::string, deserialTypeInfo> typeinfoHistory;
+
+
+
+/*
+* History for Unresolved decl hashes
+*/
+
+struct declhashwarning_t {
+	uint32_t warningsgenerated = 0;
+	std::set<std::string> fileList;
+};
+
+std::unordered_map<uint64_t, declhashwarning_t> unresolvedHashHistory;
 
 // Used for stack tracing
 thread_local std::vector<std::string_view> propertyStack;
@@ -18,6 +45,7 @@ thread_local deserialTypeInfo lastAccessedTypeInfo;
 thread_local int warningCount = 0;
 thread_local int fileCount = 0;
 thread_local const void* fileStartAddress = nullptr; // For debugger view
+thread_local uint64_t currentEntHash = 0;
 
 void LogWarning(std::string_view msg) {
 	std::string propString;
@@ -79,7 +107,7 @@ struct inherithash_t {
 };
 #pragma pack(pop)
 
-void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo, uint32_t entityClass)
+void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo, uint64_t entityhash)
 {
 	lastAccessedTypeInfo = {nullptr, nullptr};
 	fileStartAddress = (const void*)reader.GetBuffer();
@@ -104,6 +132,8 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo, ui
 		BinaryReader inheritReader(reinterpret_cast<char*>(&inherit), sizeof(inherithash_t));
 		inheritVar.Exec(inheritReader, writeTo);
 	}
+
+	currentEntHash = entityhash;
 
 	// In map entities this byte is 0
 	assert(reader.ReadLE(bytecode));
@@ -151,12 +181,28 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo, ui
 		}
 	}
 
-	// If the class is not explicitly defined, look it up
-	// TODO: Must insert class string into the text block manually if this is the case
+	// If the class is not explicitly defined due to inheritance, look it up
 	if (lastAccessedTypeInfo.callback == nullptr) {
-		auto typeiter = typeInfoPtrMap.find(entityClass);
+		auto hashiter = entityclassmap.find(entityhash);
+		assert(hashiter != entityclassmap.end());
+
+		auto typeiter = typeInfoPtrMap.find(hashiter->second.typehash);
 		assert(typeiter != typeInfoPtrMap.end());
 		lastAccessedTypeInfo = typeiter->second;
+
+		// Insert the class string into the text block
+		// Must account for it being defined with the class missing,
+		// or not defined at all
+		if (length == 0) {
+			writeTo.append("systemVars = {\nentityType = \"");
+		}
+		else {
+			writeTo.pop_back();
+			writeTo.pop_back(); // Pop the newline and close brace
+			writeTo.append("entityType = \"");
+		}
+		writeTo.append(lastAccessedTypeInfo.name);
+		writeTo.append("\";\n}\n");
 	}
 		
 
@@ -205,10 +251,117 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo, ui
 	assert(reader.ReachedEOF());
 }
 
+void deserial::ds_start_logicdecl(BinaryReader& reader, std::string& writeTo, LogicType declclass) {
+	#define HASH_EDIT 0xC2D0B77C0D10391CUL
+	uint8_t bytecode;
+	uint32_t length;
+	uint64_t inherits;
+
+	// File starts with a 0 byte
+	assert(reader.ReadLE(bytecode));
+	assert(bytecode == 0);
+
+	// Length of file past this point
+	assert(reader.ReadLE(length));
+	assert(length == reader.GetRemaining());
+
+	// Parent decl hash - should always be 0
+	assert(reader.ReadLE(inherits));
+	assert(inherits == 0);
+
+	// Bytecode of 1, followed by word of padding
+	assert(reader.ReadLE(bytecode));
+	assert(bytecode == 1);
+	assert(reader.ReadLE(length));
+	assert(length == 0);
+
+	// Length of deserialization block
+	assert(reader.ReadLE(length));
+	assert(length == reader.GetRemaining());
+
+	// Edit Property Hash
+	assert(reader.ReadLE(bytecode));
+	assert(bytecode == 0);
+	assert(reader.ReadLE(inherits));
+	assert(inherits == HASH_EDIT);
+
+	deserializer editblock = { nullptr, "edit", 0 };
+	
+	switch (declclass) {
+		case LT_LogicClass:
+		editblock.callback = &ds_idDeclLogicClass;
+		break;
+
+		case LT_LogicEntity:
+		editblock.callback = &ds_idDeclLogicEntity;
+		break;
+
+		case LT_LogicFX:
+		editblock.callback = &ds_idDeclLogicFX;
+		break;
+
+		case LT_LogicLibrary:
+		editblock.callback = &ds_idDeclLogicLibrary;
+		break;
+
+		case LT_LogicUIWidget:
+		editblock.callback = &ds_idDeclLogicUIWidget;
+		break;
+	}
+	editblock.Exec(reader, writeTo);
+}
+
 void deserial::ds_pointerbase(BinaryReader& reader, std::string& writeTo)
 {
+	//std::string temp(reader.GetBuffer(), reader.GetLength());
+	//uint64_t hash;
+	//reader.ReadLE(hash);
+
+	//auto iter = declHashMap.find(hash);
+	//bool bad = iter == declHashMap.end();
+	//std::string path;
+	//if(!bad)
+	//	path = iter->second;
+
 	LogWarning("Called ds_pointerbase - deserialization algorithm unknown");
 	writeTo.append("\"ds_pointerbase_unknown\";\n");
+}
+
+void deserial::ds_pointeridStaticModel(BinaryReader& reader, std::string& writeTo)
+{
+	assert(*(reader.GetBuffer() - 5) == 1); // Leaf node
+	assert(reader.GetLength() == 8);
+	uint64_t hash;
+	assert(reader.ReadLE(hash));
+
+	if (hash == 0) {
+		writeTo.append("NULL;\n");
+		return;
+	}
+
+	auto iter = modelHashMap.find(hash);
+	assert(iter != modelHashMap.end());
+
+	writeTo.push_back('"');
+	writeTo.append(iter->second);
+	writeTo.append("\";\n");
+}
+
+// TODO: Figure out what these hashes represent
+void deserial::ds_pointerdeclinfo(BinaryReader& reader, std::string& writeTo)
+{
+	assert(*(reader.GetBuffer() - 5) == 1); // Leaf node
+	assert(reader.GetLength() == 8);
+	uint64_t hash;
+	assert(reader.ReadLE(hash));
+
+	//LogWarning("DeclInfo");
+	//auto iter = declHashMap.find(hash);
+	//if(iter != declHashMap.end())
+	//	printf("FOUND ONE\n");
+
+	writeTo.append(std::to_string(hash));
+	writeTo.append(";\n");
 }
 
 void deserial::ds_pointerdecl(BinaryReader& reader, std::string& writeTo)
@@ -226,20 +379,22 @@ void deserial::ds_pointerdecl(BinaryReader& reader, std::string& writeTo)
 
 	const auto& iter = declHashMap.find(hash);
 
-	// Todo: Generate a map of hashes to decl filepaths that includes camelcased type
-	// Query this map, append the filepath
-	writeTo.push_back('"');
 	if (iter != declHashMap.end()) {
+		writeTo.push_back('"');
 		writeTo.append(iter->second);
+		writeTo.append("\";\n");
 	}
 	else {
-		char hashString[9];
-		snprintf(hashString, 9, "%I64X", hash);
+		char hashString[17];
+		snprintf(hashString, 17, "%I64X", hash);
 		std::string msg = "Unknown Decl Hash ";
-		msg.append(hashString, 8);
+		msg.append(hashString, 16);
 		LogWarning(msg);
+
+		writeTo.append(std::to_string(hash));
+		writeTo.append(";\n");
 	}
-	writeTo.append("\";\n");
+	
 }
 
 void deserial::ds_idTypeInfoPtr(BinaryReader& reader, std::string& writeTo)
@@ -250,9 +405,9 @@ void deserial::ds_idTypeInfoPtr(BinaryReader& reader, std::string& writeTo)
 	uint32_t hash;
 	reader.ReadLE(hash);
 	if (hash == 0) {
-		
-		lastAccessedTypeInfo = {nullptr, nullptr};
-		writeTo.append("\"\";\n");
+		assert(0);
+		//lastAccessedTypeInfo = {nullptr, nullptr};
+		//writeTo.append("\"\";\n");
 	}
 	else {
 		const auto& iter = typeInfoPtrMap.find(hash);
@@ -282,20 +437,65 @@ void deserial::ds_idTypeInfoObjectPtr(BinaryReader& reader, std::string& writeTo
 	assert(bytecode == 0);
 	assert(reader.ReadLE(hash));
 
+	// Class is inherited from parent decl.
+	// We must query the typeinfo history to determine what it is
+	bool historyLookupRequired = false;
 	if (hash != HASH_className) {
-		LogWarning("TypeInfoObjectPtr has inherited class name and cannot be parsed");
-		writeTo.append("}\n");
-		return;
+		historyLookupRequired = true;
+
+		auto iter = typeinfoHistory.end();
+		uint64_t historyhash = currentEntHash;
+
+		std::string propstackstring;
+		for (std::string_view s : propertyStack) {
+			propstackstring.append(s);
+			propstackstring.push_back('/');
+		}
+
+		while (iter == typeinfoHistory.end()) {
+			entityclass_t classdef = entityclassmap[historyhash];
+			assert(classdef.parent != 0);
+			historyhash = classdef.parent;
+
+			std::string historystring = propstackstring;
+			historystring.append(std::to_string(historyhash));
+			iter = typeinfoHistory.find(historystring);
+		}
+
+		lastAccessedTypeInfo = iter->second;
+		writeTo.append("className = \"");
+		writeTo.append(lastAccessedTypeInfo.name);
+		writeTo.append("\";\n");
+	}
+	else {
+		const deserializer dsClass = { &ds_idTypeInfoPtr, "className" };
+		dsClass.Exec(reader, writeTo);
+
+		// Add to the type history
+		// Logic entities don't have inheritance and thus don't need to use
+		// the history system
+		if (deserialmode != DeserialMode::logic) {
+			std::string propstackstring;
+			for (std::string_view s : propertyStack) {
+				propstackstring.append(s);
+				propstackstring.push_back('/');
+			}
+			propstackstring.append(std::to_string(currentEntHash));
+			typeinfoHistory.emplace(propstackstring, lastAccessedTypeInfo);
+		}
 	}
 
-	const deserializer dsClass = {&ds_idTypeInfoPtr, "className"};
-	dsClass.Exec(reader, writeTo);
-
+	// If we read the object hash instead of the className hash...we have to skip the part where we
+	// attempt to read the object hash
+	if(historyLookupRequired)
+		goto LABEL_SKIP_HASH_READ;
 	if (reader.GetRemaining() > 0) {
 
 		assert(reader.ReadLE(bytecode));
 		assert(bytecode == 0);
 		assert(reader.ReadLE(hash));
+
+		LABEL_SKIP_HASH_READ:
 		assert(hash == HASH_object);
 
 		const deserializer dsObject = { lastAccessedTypeInfo.callback, "object" };
@@ -346,6 +546,9 @@ void deserial::ds_structbase(BinaryReader& reader, std::string& writeTo, const s
 {
 	// Stem node
 	if (*(reader.GetBuffer() - 5) != 0) {
+		//std::string debug(reader.GetBuffer(), reader.GetLength());
+		//size_t length = reader.GetLength();
+		//assert(length == 0);
 		LogWarning("Structure is not a stem node!");
 		writeTo.append("\"BAD STRUCT\";\n");
 		//assert(0);
@@ -561,24 +764,112 @@ void deserial::ds_idStr(BinaryReader& reader, std::string& writeTo)
 {
 	assert(*(reader.GetBuffer() - 5) == 1);
 
-	// Todo: Monitor and figure out what the exact rules for this are
 	uint8_t terminal;
 	uint32_t stringLength;
 	assert(reader.ReadLE(stringLength));
 
-	writeTo.push_back('"');
-	if (stringLength > 0) {
+	if (stringLength == 0) {
+		writeTo.append("\"\";\n");
+	}
+	else {
 		const char* bytes = nullptr;
 		assert(reader.ReadBytes(bytes, stringLength));
-		writeTo.append(bytes, stringLength);
+
+		/*
+		* Logic Entities can have multi-line strings and strings with unescaped quotes
+		*/
+		if (deserialmode == DeserialMode::logic) 
+		{
+			bool iscomplexstring = false;
+			for (const char* c = bytes, *max = bytes + stringLength; c < max; c++) {
+				if (*c == '\n' || *c == '"') {
+					iscomplexstring = true;
+					break;
+				}
+			}
+
+			if (iscomplexstring) {
+				writeTo.append("<%");
+				writeTo.append(bytes, stringLength);
+				writeTo.append("%>;\n");
+			}
+			else {
+				writeTo.push_back('"');
+				writeTo.append(bytes, stringLength);
+				writeTo.append("\";\n");
+			}
+
+				
+		}
+		else 
+		{
+			writeTo.push_back('"');
+			writeTo.append(bytes, stringLength);
+			writeTo.append("\";\n");
+		}
 
 		assert(reader.ReadLE(terminal));
 		assert(terminal == 0);
 	}
-	writeTo.append("\"\n");
 
 	assert(reader.GetRemaining() == 0);
 
+}
+
+void deserial::ds_attachParent_t(BinaryReader& reader, std::string& writeTo) {
+
+	// Attach Parent Format is [Leaf 1][uint16_t shortCode][cstring]
+
+	assert(*(reader.GetBuffer() - 5) == 1);
+
+	uint16_t parentType;
+	assert(reader.ReadLE(parentType));
+	
+	writeTo.push_back('"');
+	switch (parentType) 
+	{
+		case 0:
+		writeTo.append("none:");
+		break;
+
+		case 1:
+		writeTo.append("joint:");
+		break;
+
+		case 2:
+		writeTo.append("tag:");
+		break;
+
+		case 3:
+		writeTo.append("slot:");
+		break;
+
+		default:
+		assert(0);
+		break;
+	}
+
+	uint8_t nullbyte;
+	uint32_t stringLength;
+	const char* rawString;
+
+	assert(reader.ReadLE(stringLength));
+	assert(reader.ReadBytes(rawString, stringLength));
+	if (stringLength > 0) {
+		assert(reader.ReadLE(nullbyte));
+		assert(nullbyte == 0);
+	}
+	writeTo.append(rawString, stringLength);
+	writeTo.append("\";\n");
+	assert(reader.GetRemaining() == 0);
+}
+
+void deserial::ds_idRenderModelWeakHandle(BinaryReader& reader, std::string& writeTo)
+{
+	// TODO: Monitor this. There is absolutely no way of knowing how these are supposed to be serialized
+	// because their block lengths are 0 in every logic decl
+	assert(reader.GetLength() == 0);
+	writeTo.append("\"\";\n");
 }
 
 void deserial::ds_idLogicProperties(BinaryReader& reader, std::string& writeTo)

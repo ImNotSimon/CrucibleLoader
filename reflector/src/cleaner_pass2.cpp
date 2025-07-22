@@ -25,19 +25,27 @@ const std::set<std::string> ForcedExclusions = {
 	"float",
 	"double",
 	"idStr",
-	"idLogicProperties"
+	"idLogicProperties",
+	"attachParent_t",
+	"idRenderModelWeakHandle"
 };
 
 // For any structs that weren't included for whatever reason, but need to be
 const std::set<std::string> ForcedInclusions = {
 	"idEntityDefEditorVars",
-	"idDeclEntityDef__gameSystemVariables_t"
+	"idDeclEntityDef__gameSystemVariables_t",
+	"idDeclLogicClass",
+	"idDeclLogicLibrary",
+	"idDeclLogicFX",
+	"idDeclLogicEntity",
+	"idDeclLogicUIWidget"
 };
 
 // Instead of generating unique reflection functions, key structs' body functions
 // will only include a call to the value's reflection function
 const std::unordered_map<std::string, const char*> AliasStructs = {
 	{"idAtomicString", "idStr"},
+	{"idGameStatId", "idStr"},
 	{"aliasHandle_t", "idStr"}, // This idHandle child is serialized as a string, but not all are guaranteed to be like this (encounter event handles seem to be a typeinfo hash)
 	
 	{"secondsToGameTime_t", "idTypesafeTime_T_long_long___gameTimeUnique_t___999960_T"},
@@ -48,6 +56,9 @@ const std::unordered_map<std::string, const char*> AliasStructs = {
 	{"idTypesafeTime_T_long_long___microsecondUnique_t___1000000_T", "int"},
 	{"idTypesafeTime_T_int___millisecondUnique_t___1000_T", "int"},
 	{"idTypesafeTime_T_float___secondUnique_t___1_T", "float"},
+
+	// TODO: Monitor. Same issue as idRenderModelWeakHandle - block is always empty 
+	{"idFxHandle", "idRenderModelWeakHandle"}
 
 };
 
@@ -381,6 +392,16 @@ void idlibCleaner2::RecurseTemplates() {
 	childrenIncludes += IncludeDescendantsOf("idPhysicsEditorConstraintDef");
 	childrenIncludes += IncludeDescendantsOf("idCollision_Animated");
 	childrenIncludes += IncludeDescendantsOf("idAICondition");
+	childrenIncludes += IncludeDescendantsOf("idLogicGraphAssetClassMain");
+	childrenIncludes += IncludeDescendantsOf("idLogicNodeModel");
+	childrenIncludes += IncludeDescendantsOf("idLogicGraphAssetState");
+	childrenIncludes += IncludeDescendantsOf("idLogicGraphAssetFunction");
+	childrenIncludes += IncludeDescendantsOf("idLogicGUIItem");
+	childrenIncludes += IncludeDescendantsOf("idQuestUIData");
+	childrenIncludes += IncludeDescendantsOf("idAISnippet");
+	childrenIncludes += IncludeDescendantsOf("idLogicDebugGeometry");
+	childrenIncludes += IncludeDescendantsOf("idLogicGraphAssetEvent");
+	childrenIncludes += IncludeDescendantsOf("idUICommand");
 
 	//printf("In looping hell\n");
 	//EntNode& idTypeInfoObjectPtrs = templates["idTypeInfoObjectPtr"];
@@ -479,6 +500,22 @@ void idlibCleaner2::Build() {
 	// Seems better now after manually including entity classes - continue to monitor
 	printf("Adding Include Tags\n");
 	int includeCount = 0;
+
+	/* Manual Edits Go Here */
+	{
+		auto iter = typelib.find("idStaticModel");
+		assert(iter != typelib.end());
+		parser.EditTree("pointerfunc = pointeridStaticModel", iter->second.node, 0, 0, 0, 0);
+
+		iter = typelib.find("idCVar");
+		assert(iter != typelib.end());
+		parser.EditTree("pointerfunc = idStr", iter->second.node, 0, 0, 0, 0);
+
+		iter = typelib.find("idDeclInfo");
+		assert(iter != typelib.end());
+		parser.EditTree("pointerfunc = pointerdeclinfo", iter->second.node, 0, 0, 0, 0);
+	}
+
 	for (auto& pair : typelib)
 	{
 

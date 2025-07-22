@@ -25,7 +25,7 @@
 }
 
 void deserialTest() {
-	const char* dir = "../input/darkages/atlanextractor/entityDef";
+	const char* dir = "D:/DA/atlan/entityDef";
 	std::string derp;
 
 	int totaldeserialized = 0;
@@ -76,7 +76,7 @@ void deserialTest() {
 			derp.push_back('"');
 			derp.append(entry.path().string());
 			derp.append("\" = {");
-			deserial::ds_start_entitydef(reader, derp, iter_current->second.typehash);
+			deserial::ds_start_entitydef(reader, derp, farmhash);
 			derp.append("}\n");
 
 			if (previousWarningCount != deserial::ds_debugWarningCount())
@@ -193,6 +193,7 @@ void BuildDeclHashmap(const fspath gamedir) {
 	std::cout << "Building Decl Farmhash Map\n";
 	const std::vector<std::string> archiveList = PackageMapSpec::GetPrioritizedArchiveList(gamedir);
 	const fspath basepath = gamedir / "base";
+	deserial::modelHashMap.reserve(15000);
 
 	// Map of lowercase decl folder types to their camelcased versions
 	std::unordered_map<std::string, std::string> deptypemap;
@@ -201,6 +202,7 @@ void BuildDeclHashmap(const fspath gamedir) {
 		ResourceArchive r;
 		Read_ResourceArchive(r, basepath / archivename, RF_SkipData);
 
+		/* Get the camel-cased type strings */
 		for(uint32_t i = 0; i < r.header.numDependencies; i++) {
 			const ResourceDependency& d = r.dependencies[i];
 
@@ -213,13 +215,28 @@ void BuildDeclHashmap(const fspath gamedir) {
 			}
 			deptypemap.emplace(lowercase, typeString);
 		}
+
+		/* Get the list of model paths */
+		for (uint32_t i = 0; i < r.header.numResources; i++) {
+			const ResourceEntry& e = r.entries[i];
+
+			const char* typestring, *namestring;
+			Get_EntryStrings(r, e, typestring, namestring);
+
+			if (strcmp("model", typestring) == 0) {
+				uint64_t farmhash = HashLib::DeclHash("model", namestring);
+				deserial::modelHashMap.emplace(farmhash, namestring);
+			}
+		}
 	}
+
+	std:: cout << "Model Path Hashmap Size: " << deserial::modelHashMap.size() << "\n";
 
 	//for(const std::string& s : deptypes)
 	//	std::cout << s << "\n";
 
 	using namespace std::filesystem;
-	const fspath decldir = "../input/darkages/atlanextractor/rs_streamfile/generated/decls/";
+	const fspath decldir = "D:/DA/atlan/rs_streamfile/generated/decls/";
 	assert(is_directory(decldir));
 
 	// Add all decl folders missing from the map - assuming an all-lowercase camelcasing
@@ -232,13 +249,14 @@ void BuildDeclHashmap(const fspath gamedir) {
 	}
 
 	// TODO: This would be the place to manually adjust any camelcasings if needed
+	//deptypemap["aicomponent_lasertargeter"] = "aiComponent_laserTargeter";
 
-	const fspath entitydir = "../input/darkages/atlanextractor/entityDef";
-	const fspath logicentitydir = "../input/darkages/atlanextractor/logicEntity";
-	const fspath logicfxdir = "../input/darkages/atlanextractor/logicFX";
-	const fspath logicwidgetdir = "../input/darkages/atlanextractor/logicUIWidget";
-	const fspath logicclassdir = "../input/darkages/atlanextractor/logicClass";
-	const fspath logiclibrarydir = "../input/darkages/atlanextractor/logicLibrary";
+	const fspath entitydir = "D:/DA/atlan/entityDef";
+	const fspath logicentitydir = "D:/DA/atlan/logicEntity";
+	const fspath logicfxdir = "D:/DA/atlan/logicFX";
+	const fspath logicwidgetdir = "D:/DA/atlan/logicUIWidget";
+	const fspath logicclassdir = "D:/DA/atlan/logicClass";
+	const fspath logiclibrarydir = "D:/DA/atlan/logicLibrary";
 
 	deserial::declHashMap.reserve(100000);
 	// Get every decl hash
@@ -279,9 +297,62 @@ void CompleteEntityClassMap() {
 	}
 }
 
+void logictests() {
+	const fspath atlandir = "D:/DA/atlan";
+	const fspath classfolders[LT_MAXIMUM] = {"logicClass", "logicEntity", "logicFX", "logicLibrary", "logicUIWidget"};
+	const fspath outpaths[LT_MAXIMUM] = {"../input/atlan_logicclass.txt", "../input/atlan_logicentity.txt", "../input/atlan_logicfx.txt", "../input/atlan_logiclibrary.txt", "../input/atlan_logicwidget.txt"};
+
+
+	for (int lt = LT_LogicClass; lt < LT_MAXIMUM; lt++) {
+		using namespace std::filesystem;
+		const fspath dir = atlandir / classfolders[lt];
+		assert(is_directory(dir));
+
+		std::cout << dir << "\n";
+
+		std::string outputText;
+		outputText.reserve(1000000);
+
+		for (const directory_entry& entry : recursive_directory_iterator(dir)) {
+			if(is_directory(entry))
+				continue;
+
+			int warningCount = deserial::ds_debugWarningCount();
+			outputText.push_back('"');
+			outputText.append(entry.path().string());
+			outputText.append("\" = {");
+
+			std::string filepath = entry.path().string();
+			BinaryOpener open(filepath);
+			assert(open.Okay());
+			BinaryReader reader = open.ToReader();
+
+			deserial::ds_start_logicdecl(reader, outputText, (LogicType)lt);
+			outputText.append("}\n");
+
+			int newWarningCount = deserial::ds_debugWarningCount();
+			if(newWarningCount != warningCount)
+				std::cout << filepath << "\n";
+		}
+
+		std::ofstream outwriter(outpaths[lt], std::ios_base::binary);
+		outwriter << outputText;
+		outwriter.close();
+
+		//const fspath outdir = "../input/";
+		//outdir.
+	}
+}
+
 int main() {
 	BuildDeclHashmap("D:/Steam/steamapps/common/DOOMTheDarkAges");
 	CompleteEntityClassMap();
 	deserialTest();
+
+
+	//deserial::SetDeserialMode(DeserialMode::logic);
+	//logictests();
+
+	//std::cout << HashLib::FarmHash64("idDeclAIComponent_LaserTargeter", strlen("idDeclAIComponent_LaserTargeter"));
 	return 0;
 }

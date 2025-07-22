@@ -35,6 +35,7 @@ class idlibReflector {
         {"idManagedClassPtr", &idlibReflector::GenerateidManagedClassPtr},
         {"idLogicEntityPtr", &idlibReflector::GenerateidLogicEntityPtr},
         {"idLogicList", &idlibReflector::GenerateidLogicList},
+        {"idRenderModelWeakHandleT", &idlibReflector::GenerateidRenderModelWeakHandleT}
     };
 
 
@@ -338,6 +339,10 @@ class idlibReflector {
         descpp.append("\tds_");
         descpp.append(numType.getName());
         descpp.append("(reader, writeTo);\n");
+    }
+
+    void GenerateidRenderModelWeakHandleT(EntNode& typenode) {
+        descpp.append("\tds_idRenderModelWeakHandle(reader, writeTo);\n");
     }
 
     void GenerateidManagedClassPtr(EntNode& typenode) {

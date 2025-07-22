@@ -735,6 +735,11 @@ void EntityParser::parseContentsPermissive()
 		else if (lastTokenType & TTC_PermissiveKey) { // Consecutive Identifiers or higher
 			pushNodeBoth(EntNode::NFC_ValueFile);
 			Tokenize();
+
+			while (lastTokenType == TT_Newline) {
+				Tokenize();
+			}
+
 			if (lastTokenType == TT_BraceOpen) {
 				tempChildren.back()->nodeFlags = EntNode::NFC_ObjSimple; // Changed from ObjEntityDef to fix indentation
 				parseContentsPermissive();
@@ -1272,12 +1277,36 @@ void EntityParser::Tokenize()
 			case '\r': case '\n': case '\0': // Again, relies on string ending in null character
 			throw Error("No end-quote to complete string literal");
 
-			case '\\':
-			if(*(ch+1) == '"') ch++;
-			goto LABEL_STRING_START;
+			//case '\\':
+			//if(*(ch+1) == '"') ch++;
+			//goto LABEL_STRING_START;
 
 			default:
 			goto LABEL_STRING_START;
+		}
+
+		case '<':
+		if(PARSEMODE != ParsingMode::PERMISSIVE)
+			throw Error("Verbatim strings are for permissive mode only");
+		first = ch;
+		if(*++ch != '%')
+			throw Error("Bad start to verbatim string");
+		LABEL_VERBATIMSTRING_START:
+		switch (*++ch)
+		{
+			case '%':
+			if(*(ch+1) != '>')
+				goto LABEL_VERBATIMSTRING_START;
+			ch += 2; // Increment past > to set to next char
+			lastTokenType = TT_String;
+			lastUniqueToken = std::string_view(first, (size_t)(ch - first));
+			return;
+
+			case '\0':
+			throw Error("No end to verbatim string");
+
+			default:
+			goto LABEL_VERBATIMSTRING_START;
 		}
 
 		case '$':
