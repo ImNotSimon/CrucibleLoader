@@ -116,6 +116,24 @@ void Audit_ResourceHeader(const ResourceHeader& h)
 void Audit_ResourceArchive(const ResourceArchive& r) {
 	Audit_ResourceHeader(r.header);
 
+	// Insure string indices are in-bounds
+	for (uint32_t i = 0; i < r.header.numStringIndices; i++) {
+		uint64_t stringIndex = r.stringIndex[i];
+		assert(stringIndex < r.stringChunk.numStrings);
+	}
+
+	// Insure dependency string indices are in-bounds
+	for (uint32_t i = 0; i < r.header.numDependencies; i++) {
+		const ResourceDependency& d = r.dependencies[i];
+		assert(d.type < r.stringChunk.numStrings);
+		assert(d.name < r.stringChunk.numStrings);
+	}
+
+	// Audit String Chunk
+	{
+		const StringChunk& sc = r.stringChunk;
+	}
+
 	// Audit Entries
 	for (uint64_t i = 0; i < r.header.numResources; i++) {
 
@@ -176,12 +194,27 @@ void Audit_ResourceArchive(const ResourceArchive& r) {
 		}
 		else if(strcmp(typeString, "entityDef") == 0) {
 			//assert(e.dataSize != e.uncompressedSize);
-			//assert(e.dataCheckSum != e.defaultHash);
+			assert(e.dataCheckSum == e.defaultHash);
 			assert(e.version == 21);
 			assert(e.flags == 2);
 			//assert(e.compMode == 2 || e.compMode == 0);
 			assert(e.variation == 70);
 			//assert(e.numDependencies == 0);
+		}
+		else if (strcmp(typeString, "image") == 0) {
+			assert(e.numDependencies == 1 || e.numDependencies == 0);
+			//assert(e.dataCheckSum == e.defaultHash);
+			//if(e.numDependencies == 0)
+			//	printf("%s\n", nameString);
+			//assert(e.version == 26 || e.version == 25);
+		}
+		else if (strcmp(typeString, "mapentities") == 0) {
+			// TODO INVESTIGATE: Kraken Chunked compression results in different hash?
+			if(e.compMode == 0)
+				assert(e.dataCheckSum == e.defaultHash);
+			assert(e.version == 80 || e.version == 77);
+			assert(e.flags == 2);
+			assert(e.variation == 70);
 		}
 	}
 

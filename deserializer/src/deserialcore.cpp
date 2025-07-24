@@ -423,7 +423,12 @@ void deserial::ds_idTypeInfoPtr(BinaryReader& reader, std::string& writeTo)
 
 void deserial::ds_idTypeInfoObjectPtr(BinaryReader& reader, std::string& writeTo)
 {
-	writeTo.append("{\n");
+	/*
+	* Goal: Simplify the typeinfo syntax using the format variable_name "className" { <object_definition> }
+	*/
+	writeTo.pop_back(); // Remove the "= "
+	writeTo.pop_back();
+	//writeTo.append("{\n");
 
 	assert(*(reader.GetBuffer() - 5) == 0);
 	
@@ -431,6 +436,7 @@ void deserial::ds_idTypeInfoObjectPtr(BinaryReader& reader, std::string& writeTo
 	#define HASH_object 0x0D83405E5171CB03UL
 
 	uint8_t bytecode;
+	uint32_t u32;
 	uint64_t hash;
 
 	assert(reader.ReadLE(bytecode));
@@ -463,13 +469,25 @@ void deserial::ds_idTypeInfoObjectPtr(BinaryReader& reader, std::string& writeTo
 		}
 
 		lastAccessedTypeInfo = iter->second;
-		writeTo.append("className = \"");
-		writeTo.append(lastAccessedTypeInfo.name);
-		writeTo.append("\";\n");
+		//writeTo.append("className = \"");
+		//writeTo.append(lastAccessedTypeInfo.name);
+		//writeTo.append("\";\n");
 	}
 	else {
-		const deserializer dsClass = { &ds_idTypeInfoPtr, "className" };
-		dsClass.Exec(reader, writeTo);
+		//const deserializer dsClass = { &ds_idTypeInfoPtr, "className" };
+		//dsClass.Exec(reader, writeTo);
+
+		// Read the className typeinfo variable
+		assert(reader.ReadLE(bytecode));
+		assert(bytecode == 1);
+		assert(reader.ReadLE(u32));
+		assert(u32 == 4);
+		assert(reader.ReadLE(u32));
+		
+		auto iter = typeInfoPtrMap.find(u32);
+		assert(iter != typeInfoPtrMap.end());
+
+		lastAccessedTypeInfo = iter->second;
 
 		// Add to the type history
 		// Logic entities don't have inheritance and thus don't need to use
@@ -485,6 +503,10 @@ void deserial::ds_idTypeInfoObjectPtr(BinaryReader& reader, std::string& writeTo
 		}
 	}
 
+	writeTo.push_back('"');
+	writeTo.append(lastAccessedTypeInfo.name);
+	writeTo.append("\" "); // {\n will be added by structbase
+
 	// If we read the object hash instead of the className hash...we have to skip the part where we
 	// attempt to read the object hash
 	if(historyLookupRequired)
@@ -497,12 +519,23 @@ void deserial::ds_idTypeInfoObjectPtr(BinaryReader& reader, std::string& writeTo
 
 		LABEL_SKIP_HASH_READ:
 		assert(hash == HASH_object);
+		assert(reader.ReadLE(bytecode));
+		assert(bytecode == 0 || bytecode == 1);
+		assert(reader.ReadLE(u32));
 
-		const deserializer dsObject = { lastAccessedTypeInfo.callback, "object" };
-		dsObject.Exec(reader, writeTo);
+
+		BinaryReader objReader(reader.GetNext(), u32);
+		assert(reader.GoRight(u32));
+		lastAccessedTypeInfo.callback(objReader, writeTo);
+		//const deserializer dsObject = { lastAccessedTypeInfo.callback, "object" };
+		//dsObject.Exec(reader, writeTo);
+	}
+	else { // If the object property is not serialized, we must manually add braces
+		writeTo.append("{\n}\n");
 	}
 
-	writeTo.append("}\n");
+	assert(reader.GetRemaining() == 0);
+	//writeTo.append("}\n");
 }
 
 void deserial::ds_enumbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, const char*>& enumMap)

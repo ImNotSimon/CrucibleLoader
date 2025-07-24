@@ -11,6 +11,12 @@ enum class ModFileType : uint8_t {
 	entityDef = 1
 };
 
+// MUST MATCH THE ORDER / INDICES OF THE ABOVE ENUM
+inline const char* ModFileTypeStrings[] = {
+	"rs_streamfile",
+	"entityDef"
+};
+
 struct ModDef {
 	int loadPriority = 0;
 	std::string modName;

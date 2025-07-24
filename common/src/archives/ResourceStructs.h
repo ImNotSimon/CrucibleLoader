@@ -99,7 +99,9 @@ struct ResourceDependency {
 	uint64_t name;
 	uint32_t depType;
 	uint32_t depSubType;
-	uint64_t hashOrTimestamp;
+	uint32_t firstInt;
+	uint32_t secondInt;
+	//uint64_t hashOrTimestamp;
 };
 
 struct ResourceArchive {

@@ -195,7 +195,9 @@ void String_ResourceArchive(const ResourceArchive& r, std::string& writeTo) {
 			
 			writeTo.append("\ndepType = "); writeTo.append(std::to_string(d.depType)); 
 			writeTo.append("\ndepSubType = "); writeTo.append(std::to_string(d.depSubType));
-			writeTo.append("\ntimestampOrHash = "); writeTo.append(std::to_string(d.hashOrTimestamp));
+			//writeTo.append("\ntimestampOrHash = "); writeTo.append(std::to_string(d.hashOrTimestamp));
+			writeTo.append("\nfirstInt = "); writeTo.append(std::to_string(d.firstInt));
+			writeTo.append("\nsecondInt = "); writeTo.append(std::to_string(d.secondInt));
 
 			writeTo.append("\n}\n");
 		}
@@ -528,35 +530,60 @@ void Test_ContainerMask() {
 	}
 }
 
+struct entryvariations_t {
+	std::set<uint8_t> compmode;
+	std::set<uint32_t> version;
+	std::set<uint32_t> flags;
+	std::set<uint16_t> variation;
+	std::set<uint16_t> numDependencies;
+};
 
-int main(int argc, char* argv[]) {
-	//ExtractorMain(argc, argv);
-	return 0;
+void Test_AuditAllArchives(fspath installDir) {
+	std::vector<std::string> packages = PackageMapSpec::GetPrioritizedArchiveList(installDir);
+
+	std::unordered_map<std::string, entryvariations_t> variations;
+	variations.reserve(100);
+
+	for (int i = 0; i < packages.size(); i++) {
+		std::cout << packages[i] << "\n";
+		fspath resourcePath = installDir / "base" / packages[i];
+
+		ResourceArchive archive;
+		Read_ResourceArchive(archive, resourcePath, RF_SkipData);
+		Audit_ResourceArchive(archive);
+
+		for(int k = 0; k < archive.header.numResources; k++) {
+			const ResourceEntry& e = archive.entries[k];
+
+			const char* typestring, *namestring;
+			Get_EntryStrings(archive, e, typestring, namestring);
+
+			variations[std::string(typestring)];
+
+		}
+	}
 }
 
 
+int main(int argc, char* argv[]) {
+	#ifdef DOOMETERNAL
+	fspath gamedir = "D:/Steam/steamapps/common/DOOMEternal";
+	fspath outputdir = "../input/eternal";
+	#else
+	fspath gamedir = "D:/Steam/steamapps/common/DOOMTheDarkAges";
+	fspath outputdir = "../input/darkages";
+	#endif
 
-//int main(int argc, char* argv[]) {
-//	#ifdef DOOMETERNAL
-//	fspath gamedir = "D:/Steam/steamapps/common/DOOMEternal";
-//	fspath outputdir = "../input/eternal";
-//	#else
-//	fspath gamedir = "D:/Steam/steamapps/common/DOOMTheDarkAges";
-//	fspath outputdir = "../input/darkages";
-//	#endif
-//
-//	fspath testgamedir = "../input/darkages/injectortest";
-//
-//	InjectorMain(0);
-//	InjectorLoadMods(gamedir, argflag_resetvanilla);
-//
-//	Test_ContainerMask();
-//	PackageMapSpec::ToString(gamedir);
-//	Test_ContainerMask();
-//	Test_DumpContainerMaskHashes(gamedir, outputdir);
-//	Test_DumpManifests(gamedir, outputdir);
-//	Test_DumpAllHeaders(gamedir, outputdir);
-//	Test_DumpPriorityManifest();
-//	Test_DumpConsolidatedFiles(gamedir, outputdir);
-//	Test_DumpCommonManifest();
-//}
+	fspath testgamedir = "../input/darkages/injectortest";
+
+	Test_AuditAllArchives(gamedir);
+
+	//PackageMapSpec::ToString(gamedir);
+
+	//Test_ContainerMask();
+	//PackageMapSpec::ToString(gamedir);
+	//Test_DumpContainerMaskHashes(gamedir, outputdir);
+	//Test_DumpManifests(gamedir, outputdir);
+	//Test_DumpAllHeaders(gamedir, outputdir);
+	//Test_DumpPriorityManifest();
+}
