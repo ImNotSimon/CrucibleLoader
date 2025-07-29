@@ -60,16 +60,16 @@ class EntNode
 	* ACCESSOR METHODS
 	*/
 
-	uint16_t getFlags() {return nodeFlags;}
+	uint16_t getFlags() const {return nodeFlags;}
 
-	std::string_view getName() {return std::string_view(textPtr, nameLength); }
+	std::string_view getName() const {return std::string_view(textPtr, nameLength); }
 
-	std::string_view getValue() {return std::string_view(textPtr + nameLength, valLength); }
+	std::string_view getValue() const {return std::string_view(textPtr + nameLength, valLength); }
 
-	bool hasValue() {return valLength > 0;};
+	bool hasValue() const {return valLength > 0;};
 
 	// If the name is a string literal, return it unquoted. Otherwise return the name as normal
-	std::string_view getNameUQ() {
+	std::string_view getNameUQ() const {
 		if(nameLength == 0)
 			return "";
 		if(*textPtr == '"')
@@ -80,7 +80,7 @@ class EntNode
 	}
 
 	// If the value is a string literal, get it with the quotes removed. Else return the value as normal
-	std::string_view getValueUQ() {
+	std::string_view getValueUQ() const {
 		if(valLength == 0)
 			return "";
 		if(textPtr[nameLength] == '"')
@@ -96,9 +96,13 @@ class EntNode
 
 	bool IsContainer();
 
-	int NameLength() { return nameLength; }
+	const char* NamePtr() const {return textPtr;}
 
-	int ValueLength() { return valLength; }
+	const char* ValuePtr() const {return textPtr + valLength;}
+
+	int NameLength() const { return nameLength; }
+
+	int ValueLength() const { return valLength; }
 
 	EntNode* getParent() { return parent; }
 
@@ -211,7 +215,39 @@ class EntNode
 	* 
 	* @writeTo if the value can be interpreted as a boolean, write it here
 	*/
-	bool ValueBool(bool& writeTo) const;
+	bool ValueBool(bool& writeTo) const
+	{
+		if (valLength == 0) return false;
+
+		const char* ptr = textPtr + nameLength;
+
+		if (valLength == 1) {
+			if (*ptr == '0') {
+				writeTo = false;
+				return true;
+			}
+			if (*ptr == '1') {
+				writeTo = true;
+				return true;
+			}
+		}
+
+		if (valLength == 4) {
+			if (memcmp(ptr, "true", 4) == 0) {
+				writeTo = true;
+				return true;
+			}
+		}
+
+		if (valLength == 5) {
+			if (memcmp(ptr, "false", 5) == 0) {
+				writeTo = false;
+				return true;
+			}
+		}
+
+		return false;
+	}
 
 	/*
 	* DEBUGGING FUNCTIONS

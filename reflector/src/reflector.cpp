@@ -10,14 +10,16 @@ const char* desHeaderStart =
 R"(#include <string>
 class BinaryReader;
 
+typedef void dsfunc_t(BinaryReader&, std::string&);
+
 namespace deserial {
 )";
 
 const char* desCppStart =
 R"(#include "deserialgenerated.h"
 #include "deserialcore.h"
-#include "io/BinaryReader.h"
-#include <cassert>
+
+#define dsfunc_m(NAME) void NAME(BinaryReader& reader, std::string& writeTo)
 
 )";
 
@@ -31,7 +33,7 @@ class idlibReflector {
         {"idListMap", &idlibReflector::GenerateidListMap },
         {"idTypeInfoPtr", &idlibReflector::GenerateidTypeInfoPtr},
         {"idTypeInfoObjectPtr", &idlibReflector::GenerateidTypeInfoObjectPtr},
-        {"idTypesafeNumber", &idlibReflector::GenerateidTypesafeNumber},
+        //{"idTypesafeNumber", &idlibReflector::GenerateidTypesafeNumber},
         {"idManagedClassPtr", &idlibReflector::GenerateidManagedClassPtr},
         {"idLogicEntityPtr", &idlibReflector::GenerateidLogicEntityPtr},
         {"idLogicList", &idlibReflector::GenerateidLogicList},
@@ -60,13 +62,13 @@ class idlibReflector {
             if(&current["INCLUDE"] == EntNode::SEARCH_404)
                 continue;
 
-            desheader.append("\tvoid ds_");
+            desheader.append("\tdsfunc_t ds_");
             desheader.append(current.getName());
-            desheader.append("(BinaryReader& reader, std::string& writeTo);\n");
+            desheader.append(";\n");
 
-            descpp.append("void deserial::ds_");
+            descpp.append("dsfunc_m(deserial::ds_");
             descpp.append(current.getName());
-            descpp.append("(BinaryReader& reader, std::string& writeTo) {\n");
+            descpp.append(") {\n");
             descpp.append("\tconst std::unordered_map<uint64_t, const char*> valueMap = {\n");
 
             EntNode& values = current["values"];
@@ -171,13 +173,13 @@ class idlibReflector {
             if(&current["INCLUDE"] == EntNode::SEARCH_404)
                 continue;
 
-            desheader.append("\tvoid ds_");
+            desheader.append("\tdsfunc_t ds_");
             desheader.append(current.getName());
-            desheader.append("(BinaryReader& reader, std::string& writeTo);\n");
+            desheader.append(";\n");
             
-            descpp.append("void deserial::ds_");
+            descpp.append("dsfunc_m(deserial::ds_");
             descpp.append(current.getName());
-            descpp.append("(BinaryReader& reader, std::string& writeTo) {\n");
+            descpp.append(") {\n");
 
             if (bodyFunction == nullptr) {
                 EntNode& alias = current["alias"];
@@ -332,6 +334,8 @@ class idlibReflector {
         descpp.append("\tds_idTypeInfoObjectPtr(reader, writeTo);\n");
     }
 
+    // DEPRECATED: Must alias these on a case-by-case basis in pass 2 because some
+    // are treated as stems and others and leaves
     void GenerateidTypesafeNumber(EntNode& typenode) {
         EntNode& numType = *typenode["values"].ChildAt(0);
         assert(numType.getValue() == "value");

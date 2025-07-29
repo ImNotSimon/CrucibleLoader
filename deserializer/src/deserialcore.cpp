@@ -9,6 +9,8 @@
 #define assert(OP) (OP)
 #endif
 
+#define dsfunc_m(NAME) void NAME(BinaryReader& reader, std::string& writeTo)
+
 DeserialMode deserialmode = DeserialMode::entitydef;
 
 void deserial::SetDeserialMode(DeserialMode newmode)
@@ -18,26 +20,12 @@ void deserial::SetDeserialMode(DeserialMode newmode)
 
 // Built before deserialization begins
 std::unordered_map<uint64_t, std::string> deserial::declHashMap;
-std::unordered_map<uint64_t, std::string> deserial::modelHashMap;
 std::unordered_map<uint64_t, entityclass_t> deserial::entityclassmap;
 
 // Built during deserialization
 // Strings follow the format of:
 // property/stack/trace/entityfarmhash
 std::unordered_map<std::string, deserialTypeInfo> typeinfoHistory;
-
-
-
-/*
-* History for Unresolved decl hashes
-*/
-
-struct declhashwarning_t {
-	uint32_t warningsgenerated = 0;
-	std::set<std::string> fileList;
-};
-
-std::unordered_map<uint64_t, declhashwarning_t> unresolvedHashHistory;
 
 // Used for stack tracing
 thread_local std::vector<std::string_view> propertyStack;
@@ -135,9 +123,19 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo, ui
 
 	currentEntHash = entityhash;
 
-	// In map entities this byte is 0
+	// In map entities this byte is 0; in entitydefs this is 1
+	// Presumably this is expandInheritance
 	assert(reader.ReadLE(bytecode));
-	assert(bytecode == 1);
+	writeTo.append("expandInheritance = ");
+	if (deserialmode == DeserialMode::entitydef) {
+		assert(bytecode == 1);
+		writeTo.append("true;\n");
+	}
+	else {
+		assert(bytecode == 0);
+		writeTo.append("false;\n");
+	}
+
 
 	// Block #1 - Padded Wrapper --> Serialization Hash --> Editor Vars
 	{
@@ -182,8 +180,9 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo, ui
 	}
 
 	// If the class is not explicitly defined due to inheritance, look it up
+	// Use the parent hash to make this work with both entitydefs and mapentities
 	if (lastAccessedTypeInfo.callback == nullptr) {
-		auto hashiter = entityclassmap.find(entityhash);
+		auto hashiter = entityclassmap.find(inherit.hash);
 		assert(hashiter != entityclassmap.end());
 
 		auto typeiter = typeInfoPtrMap.find(hashiter->second.typehash);
@@ -251,6 +250,201 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo, ui
 	assert(reader.ReachedEOF());
 }
 
+void ds_submapentity(BinaryReader& reader, std::string& writeTo)
+{
+
+}
+
+void ds_submap(BinaryReader& reader, std::string& writeTo, std::string& StringTable, bool BuildStringTable)
+{
+	uint8_t bytecode;
+	uint32_t len;
+
+	/* Start of submap chunk */
+	assert(reader.ReadLE(len));
+	assert(len == 0x0A);
+	assert(reader.ReadLE(bytecode));
+	assert(bytecode == 1);
+	assert(reader.ReadLE(len));
+	assert(len == 0);
+
+	/* Compilation Metadata Strings */
+	uint32_t numMetaProperties;
+	assert(reader.ReadLE(numMetaProperties));
+	if (numMetaProperties > 0) {
+		std::string temptable = "metadata = {\n";
+		
+		// Each meta property consists of a key string, and a value string
+		for (uint32_t i = 0; i < numMetaProperties; i++) {
+
+			const char* bytes = nullptr;
+			assert(reader.ReadLE(len));
+			assert(reader.ReadBytes(bytes, len));
+
+			temptable.append(bytes, len);
+			temptable.append(" = \"");
+
+			assert(reader.ReadLE(len));
+			assert(reader.ReadBytes(bytes, len));
+			temptable.append(bytes, len);
+			temptable.append("\";\n");
+		}
+
+		/*
+		* It's the same string table duplicated across every
+		* submap chunk for some reason
+		*/
+
+		temptable.append("}\n");
+		if (BuildStringTable) {
+			StringTable = temptable;
+		}
+		else {
+			assert(StringTable == temptable);
+		}
+	}
+
+	/* End of String Chunk */
+	assert(reader.ReadLE(len));
+	assert(len == 0);
+
+	/* 
+	* This is written into the first 4 bytes of the world entity
+	* So we must technically skip reading those first 4 bytes just for this entity
+	*/
+	uint32_t totalentities;
+	uint32_t currententity = 0;
+	assert(reader.ReadLE(totalentities));
+	const char* debug_lastent = nullptr;
+	goto LABEL_SKIP_FIRST_4_BYTES;
+
+	
+	while (currententity < totalentities) {
+
+		assert(reader.ReadLE(len));
+		assert(len == 0);
+
+		LABEL_SKIP_FIRST_4_BYTES:
+		writeTo.append("entity {\n");
+
+		uint32_t namelength = 0;
+		const char* entname = nullptr;
+
+		// Normally 0, but if this is one there's another string
+		// Highly likely this is the layers information!!!
+		assert(reader.ReadLE(len));
+		if (len == 1) {
+			assert(reader.ReadLE(namelength));
+			assert(reader.ReadBytes(entname, namelength));
+
+			writeTo.append("layer = \"");
+			writeTo.append(entname);
+			writeTo.append("\";\n");
+		}
+		else {
+			assert(len == 0);
+		}
+
+		uint32_t instanceid;
+		assert(reader.ReadLE(instanceid));
+		if (instanceid != 0) {
+			writeTo.append("instanceId = ");
+			writeTo.append(std::to_string(instanceid));
+			writeTo.append(";\n");
+		}
+
+
+		assert(reader.ReadLE(namelength));
+		assert(reader.ReadBytes(entname, namelength));
+		
+		// If the instance id is zero the entity's "true" name
+		// will follow it's original name
+		if (instanceid != 0) {
+			writeTo.append("originalName = \"");
+			writeTo.append(entname, namelength);
+			writeTo.append("\";\n");
+			assert(reader.ReadLE(namelength));
+			assert(reader.ReadBytes(entname, namelength));
+		}
+
+		writeTo.append("name = \"");
+		writeTo.append(entname, namelength);
+		writeTo.append("\";\n");
+
+		debug_lastent = entname;
+		//printf("%.*s\n", entname, namelength);
+
+		assert(reader.ReadLE(len));
+		BinaryReader entreader(reader.GetNext(), len);
+		deserial::ds_start_entitydef(entreader, writeTo, -1);
+
+		assert(reader.GoRight(len));
+
+		writeTo.append("}\n");
+
+		currententity++;
+	}
+}
+
+void deserial::ds_start_mapentities(BinaryReader& reader, std::string& writeTo)
+{
+	uint32_t totalmaps = *reinterpret_cast<const uint32_t*>(reader.GetBuffer());
+	BinaryReader header(reader.GetBuffer(), totalmaps * 32 + 16 + 100); // Sizeof submap header struct + first 4 integers in file + some extra to prevent OOB
+	assert(header.GoRight(24)); // Move to length of first submap chunk
+
+	/* Find the first submap chunk */
+	{
+		const char submapcode[] = { 0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00 };
+
+		// String search function refuses to work so we have to do this
+		const char* ptr = reader.GetBuffer(), * max = reader.GetBuffer() + reader.GetLength() - sizeof(submapcode);
+		size_t startIndex = -1;
+
+		while (ptr < max) {
+			if (*ptr == 0) {
+				if (memcmp(ptr, submapcode, sizeof(submapcode)) == 0) {
+					startIndex = ptr - reader.GetBuffer();
+					break;
+				}
+			}
+			ptr++;
+		}
+
+		assert(reader.GoRight(startIndex));
+	}
+
+	/*
+	* We are interpreting it as:
+	* - Start of submap is 0x0A
+	* - End of submap has 4 null bytes
+	*/
+
+	std::string stringtable;
+	for (uint32_t i = 0; i < totalmaps; i++) {
+		uint32_t submaplength;
+		assert(header.ReadLE(submaplength));
+		assert(header.GoRight(28));
+
+		while (*reader.GetNext() != 0x0A) {
+			uint8_t dummy;
+			assert(reader.ReadLE(dummy));
+			
+			// Not guaranteed
+			//assert(dummy == 0); 
+		}
+		
+		BinaryReader submapreader(reader.GetNext(), submaplength);
+		ds_submap(submapreader, writeTo, stringtable, i == 0);
+
+		assert(reader.GoRight(submaplength));
+	}
+
+	assert(reader.ReachedEOF());
+
+	writeTo.append(stringtable);
+	//printf("%s", stringtable.c_str());
+}
+
 void deserial::ds_start_logicdecl(BinaryReader& reader, std::string& writeTo, LogicType declclass) {
 	#define HASH_EDIT 0xC2D0B77C0D10391CUL
 	uint8_t bytecode;
@@ -311,60 +505,20 @@ void deserial::ds_start_logicdecl(BinaryReader& reader, std::string& writeTo, Lo
 	editblock.Exec(reader, writeTo);
 }
 
-void deserial::ds_pointerbase(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_pointerbase)
 {
-	//std::string temp(reader.GetBuffer(), reader.GetLength());
-	//uint64_t hash;
-	//reader.ReadLE(hash);
-
-	//auto iter = declHashMap.find(hash);
-	//bool bad = iter == declHashMap.end();
-	//std::string path;
-	//if(!bad)
-	//	path = iter->second;
-
 	LogWarning("Called ds_pointerbase - deserialization algorithm unknown");
-	writeTo.append("\"ds_pointerbase_unknown\";\n");
+	deserial::ds_unsigned_long_long(reader, writeTo);
 }
 
-void deserial::ds_pointeridStaticModel(BinaryReader& reader, std::string& writeTo)
+// TODO: Figure out what these hashes represent - unfortunately they're not a dependency hash
+dsfunc_m(deserial::ds_pointerdeclinfo)
 {
-	assert(*(reader.GetBuffer() - 5) == 1); // Leaf node
-	assert(reader.GetLength() == 8);
-	uint64_t hash;
-	assert(reader.ReadLE(hash));
-
-	if (hash == 0) {
-		writeTo.append("NULL;\n");
-		return;
-	}
-
-	auto iter = modelHashMap.find(hash);
-	assert(iter != modelHashMap.end());
-
-	writeTo.push_back('"');
-	writeTo.append(iter->second);
-	writeTo.append("\";\n");
-}
-
-// TODO: Figure out what these hashes represent
-void deserial::ds_pointerdeclinfo(BinaryReader& reader, std::string& writeTo)
-{
-	assert(*(reader.GetBuffer() - 5) == 1); // Leaf node
-	assert(reader.GetLength() == 8);
-	uint64_t hash;
-	assert(reader.ReadLE(hash));
-
 	//LogWarning("DeclInfo");
-	//auto iter = declHashMap.find(hash);
-	//if(iter != declHashMap.end())
-	//	printf("FOUND ONE\n");
-
-	writeTo.append(std::to_string(hash));
-	writeTo.append(";\n");
+	deserial::ds_unsigned_long_long(reader, writeTo);
 }
 
-void deserial::ds_pointerdecl(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_pointerdecl)
 {
 	assert(*(reader.GetBuffer() - 5) == 1); // Leaf node
 	assert(reader.GetLength() == 8);
@@ -397,7 +551,7 @@ void deserial::ds_pointerdecl(BinaryReader& reader, std::string& writeTo)
 	
 }
 
-void deserial::ds_idTypeInfoPtr(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_idTypeInfoPtr)
 {
 	assert(*(reader.GetBuffer() - 5) == 1); // Leaf node
 	assert(reader.GetLength() == 4);
@@ -421,14 +575,13 @@ void deserial::ds_idTypeInfoPtr(BinaryReader& reader, std::string& writeTo)
 	}
 }
 
-void deserial::ds_idTypeInfoObjectPtr(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_idTypeInfoObjectPtr)
 {
 	/*
 	* Goal: Simplify the typeinfo syntax using the format variable_name "className" { <object_definition> }
 	*/
 	writeTo.pop_back(); // Remove the "= "
 	writeTo.pop_back();
-	//writeTo.append("{\n");
 
 	assert(*(reader.GetBuffer() - 5) == 0);
 	
@@ -469,14 +622,8 @@ void deserial::ds_idTypeInfoObjectPtr(BinaryReader& reader, std::string& writeTo
 		}
 
 		lastAccessedTypeInfo = iter->second;
-		//writeTo.append("className = \"");
-		//writeTo.append(lastAccessedTypeInfo.name);
-		//writeTo.append("\";\n");
 	}
 	else {
-		//const deserializer dsClass = { &ds_idTypeInfoPtr, "className" };
-		//dsClass.Exec(reader, writeTo);
-
 		// Read the className typeinfo variable
 		assert(reader.ReadLE(bytecode));
 		assert(bytecode == 1);
@@ -490,9 +637,9 @@ void deserial::ds_idTypeInfoObjectPtr(BinaryReader& reader, std::string& writeTo
 		lastAccessedTypeInfo = iter->second;
 
 		// Add to the type history
-		// Logic entities don't have inheritance and thus don't need to use
+		// Logic and map entities don't have inheritance and thus don't need to use
 		// the history system
-		if (deserialmode != DeserialMode::logic) {
+		if (deserialmode == DeserialMode::entitydef) {
 			std::string propstackstring;
 			for (std::string_view s : propertyStack) {
 				propstackstring.append(s);
@@ -527,8 +674,6 @@ void deserial::ds_idTypeInfoObjectPtr(BinaryReader& reader, std::string& writeTo
 		BinaryReader objReader(reader.GetNext(), u32);
 		assert(reader.GoRight(u32));
 		lastAccessedTypeInfo.callback(objReader, writeTo);
-		//const deserializer dsObject = { lastAccessedTypeInfo.callback, "object" };
-		//dsObject.Exec(reader, writeTo);
 	}
 	else { // If the object property is not serialized, we must manually add braces
 		writeTo.append("{\n}\n");
@@ -570,12 +715,7 @@ void deserial::ds_enumbase(BinaryReader& reader, std::string& writeTo, const std
 	writeTo.append("\";\n");
 }
 
-void deserial::ds_blockbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap)
-{
-
-}
-
-void deserial::ds_structbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap)
+void deserial::ds_structbase(BinaryReader& reader, std::string& writeTo, const dspropmap_t& propMap)
 {
 	// Stem node
 	if (*(reader.GetBuffer() - 5) != 0) {
@@ -584,7 +724,6 @@ void deserial::ds_structbase(BinaryReader& reader, std::string& writeTo, const s
 		//assert(length == 0);
 		LogWarning("Structure is not a stem node!");
 		writeTo.append("\"BAD STRUCT\";\n");
-		//assert(0);
 		return;
 	}
 
@@ -615,12 +754,17 @@ void deserial::ds_structbase(BinaryReader& reader, std::string& writeTo, const s
 			uint32_t len;
 			assert(reader.ReadLE(len));
 			assert(reader.GoRight(len));
+
+			// DEBUGGING: Put the hash into the file
+			writeTo.push_back('"');
+			writeTo.append(std::to_string(hash));
+			writeTo.append("\"\n");
 		}
 	}
 	writeTo.append("}\n");
 }
 
-void deserial::ds_idList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string& writeTo))
+void deserial::ds_idList(BinaryReader& reader, std::string& writeTo, dsfunc_t* callback)
 {
 	writeTo.append("{\n");
 
@@ -689,6 +833,15 @@ void deserial::ds_idList(BinaryReader& reader, std::string& writeTo, void(*callb
 
 void deserial::ds_staticList(BinaryReader& reader, std::string& writeTo, deserializer basetype)
 {
+	std::string_view debugging(reader.GetBuffer(), reader.GetLength());
+
+	// Apparently this can happen....
+	if (*(reader.GetBuffer() - 5) == 1) {
+		assert(reader.GetLength() == 0);
+		writeTo.append("{\n}\n");
+		return;
+	}
+
 	// Static lists are serialized the exact same way as idLists. They just don't have a length property
 	// and elements use the property's original name
 	// Todo: Possibly find a way to consolidate code across list/staticlist/deserializer functions? But probably not going to happen
@@ -729,7 +882,7 @@ void deserial::ds_staticList(BinaryReader& reader, std::string& writeTo, deseria
 	writeTo.append("}\n");
 }
 
-void deserial::ds_idListMap(BinaryReader& reader, std::string& writeTo, void(*keyfunc)(BinaryReader& reader, std::string& writeTo), void(*valuefunc)(BinaryReader& reader, std::string& writeTo))
+void deserial::ds_idListMap(BinaryReader& reader, std::string& writeTo, dsfunc_t* keyfunc, dsfunc_t* valuefunc)
 {
 	assert(*(reader.GetBuffer() - 5) == 0);
 	writeTo.append("{\n");
@@ -793,7 +946,7 @@ void deserial::ds_idListMap(BinaryReader& reader, std::string& writeTo, void(*ke
 	writeTo.append("}\n");
 }
 
-void deserial::ds_idStr(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_idStr)
 {
 	assert(*(reader.GetBuffer() - 5) == 1);
 
@@ -809,9 +962,9 @@ void deserial::ds_idStr(BinaryReader& reader, std::string& writeTo)
 		assert(reader.ReadBytes(bytes, stringLength));
 
 		/*
-		* Logic Entities can have multi-line strings and strings with unescaped quotes
+		* Logic Entities AND map entities can have multi-line strings and strings with unescaped quotes
 		*/
-		if (deserialmode == DeserialMode::logic) 
+		if (deserialmode != DeserialMode::entitydef) 
 		{
 			bool iscomplexstring = false;
 			for (const char* c = bytes, *max = bytes + stringLength; c < max; c++) {
@@ -849,9 +1002,10 @@ void deserial::ds_idStr(BinaryReader& reader, std::string& writeTo)
 
 }
 
-void deserial::ds_attachParent_t(BinaryReader& reader, std::string& writeTo) {
+dsfunc_m(deserial::ds_attachParent_t)
+{
 
-	// Attach Parent Format is [Leaf 1][uint16_t shortCode][cstring]
+	// Attach Parent Format is [Leaf = 1][uint16_t shortCode][cstring]
 
 	assert(*(reader.GetBuffer() - 5) == 1);
 
@@ -897,7 +1051,7 @@ void deserial::ds_attachParent_t(BinaryReader& reader, std::string& writeTo) {
 	assert(reader.GetRemaining() == 0);
 }
 
-void deserial::ds_idRenderModelWeakHandle(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_idRenderModelWeakHandle)
 {
 	// TODO: Monitor this. There is absolutely no way of knowing how these are supposed to be serialized
 	// because their block lengths are 0 in every logic decl
@@ -905,7 +1059,7 @@ void deserial::ds_idRenderModelWeakHandle(BinaryReader& reader, std::string& wri
 	writeTo.append("\"\";\n");
 }
 
-void deserial::ds_idLogicProperties(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_idLogicProperties)
 {
 	assert(*(reader.GetBuffer() - 5) == 0); // Stem node
 	writeTo.append("{\n");
@@ -935,7 +1089,43 @@ void deserial::ds_idLogicProperties(BinaryReader& reader, std::string& writeTo)
 	writeTo.append("}\n");
 }
 
-void deserial::ds_bool(BinaryReader& reader, std::string& writeTo)
+/*
+* This structure is undefined in the idlib, and is presumably a polymorphic decl variable
+* We assume the following:
+* - The property hash matches the camel-cased folder path
+*/
+dsfunc_m(ds_idEventArgDeclPtr)
+{
+	// Also not farm hashes
+	const dspropmap_t propMap = {
+		{15128935135463038980, {&deserial::ds_pointerdecl, "soundstate"}},
+		{17887799704904324637, {&deserial::ds_pointerdecl, "rumble"}},
+		{17887800778963345949, {&deserial::ds_pointerdecl, "string"}}
+	};
+	deserial::ds_structbase(reader, writeTo, propMap);
+}
+
+dsfunc_m(deserial::ds_idEventArg)
+{
+	// These are not farmhashes - these are the class name hashes
+	const dspropmap_t propMap = {
+		{1182887132, {&ds_eEncounterSpawnType_t, "eEncounterSpawnType_t"}},
+		{11024699549390617459, {&ds_bool, "bool"}},
+		{10770807278281925633, {&ds_long_long, "int"}}, // It's actually 8 bytes..
+		{4511345809429878981, {&ds_idStr, "string"}},
+		{6144605143588414986, {&ds_idStr, "entity"}},
+		{11643015150811461308, {&ds_float, "float"}},
+		{2111299206, {&ds_idCombatStates_t, "idCombatStates_t"}},
+		{18446744073207127831, {&ds_encounterGroupRole_t, "encounterGroupRole_t"}},
+		{614444004, {&ds_encounterLogicOperator_t, "encounterLogicOperator_t"}},
+		{18446744072262373936, {&ds_eEncounterEventFlags_t, "eEncounterEventFlags_t"}},
+		{18446744072526653912, {&ds_idEmpoweredAIType_t, "idEmpoweredAIType_t"}},
+		{853223886056435927, {&ds_idEventArgDeclPtr, "decl"}},
+	};
+	ds_structbase(reader, writeTo, propMap);
+}
+
+dsfunc_m(deserial::ds_bool)
 {
 	assert(*(reader.GetBuffer() - 5) == 1);
 	assert(reader.GetLength() == 1);
@@ -949,77 +1139,79 @@ void deserial::ds_bool(BinaryReader& reader, std::string& writeTo)
 template<typename T>
 __forceinline void ds_num(BinaryReader& reader, std::string& writeTo)
 {
+	std::string_view data(reader.GetBuffer(), reader.GetLength());
+
 	assert(*(reader.GetBuffer() - 5) == 1); // Stem and leaf
 	assert(reader.GetLength() == sizeof(T));
 
 	T val;
-	reader.ReadLE(val);
+	assert(reader.ReadLE(val));
 
 	writeTo.append(std::to_string(val)); // Should be promoted to integer when it's a character
 	writeTo.append(";\n");
 }
 
-void deserial::ds_char(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_char)
 {
 	ds_num<int8_t>(reader, writeTo);
 }
 
-void deserial::ds_unsigned_char(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_unsigned_char)
 {
 	ds_num<uint8_t>(reader, writeTo);
 }
 
-void deserial::ds_wchar_t(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_wchar_t)
 {
 	ds_num<uint16_t>(reader, writeTo);
 }
 
-void deserial::ds_short(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_short)
 {
 	ds_num<int16_t>(reader, writeTo);
 }
 
-void deserial::ds_unsigned_short(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_unsigned_short)
 {
 	ds_num<uint16_t>(reader, writeTo);
 }
 
-void deserial::ds_int(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_int)
 {
 	ds_num<int32_t>(reader, writeTo);
 }
 
-void deserial::ds_unsigned_int(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_unsigned_int)
 {
 	ds_num<uint32_t>(reader, writeTo);
 }
 
-void deserial::ds_long(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_long)
 {
 	ds_num<int32_t>(reader, writeTo);
 }
 
-void deserial::ds_long_long(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_long_long)
 {
 	ds_num<int64_t>(reader, writeTo);
 }
 
-void deserial::ds_unsigned_long(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_unsigned_long)
 {
 	ds_num<uint32_t>(reader, writeTo);
 }
 
-void deserial::ds_unsigned_long_long(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_unsigned_long_long)
 {
 	ds_num<uint64_t>(reader, writeTo);
 }
 
-void deserial::ds_float(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_float)
 {
 	ds_num<float>(reader, writeTo);
 }
 
-void deserial::ds_double(BinaryReader& reader, std::string& writeTo)
+dsfunc_m(deserial::ds_double)
 {
 	ds_num<double>(reader, writeTo);
 }

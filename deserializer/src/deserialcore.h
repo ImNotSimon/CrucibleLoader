@@ -1,12 +1,15 @@
 #pragma once
 #include <string>
-#include <cstdint>
 #include <unordered_map>
 
 class BinaryReader;
+struct deserializer;
+
+typedef void dsfunc_t(BinaryReader&, std::string&);
+typedef std::unordered_map<uint64_t, deserializer> dspropmap_t;
 
 struct deserializer {
-	void (*callback)(BinaryReader& reader, std::string& writeto) = nullptr;
+	dsfunc_t* callback = nullptr;
 	const char* name = nullptr;
 	int arrayLength = 0; // If > 0, treat this as a static array
 
@@ -19,6 +22,7 @@ struct deserialTypeInfo {
 };
 
 struct entityclass_t {
+	std::string filepath;
 	uint64_t parent = 0;
 	uint32_t typehash = 0;
 	bool deserialized = false;
@@ -35,7 +39,8 @@ enum LogicType {
 
 enum class DeserialMode {
 	entitydef,
-	logic
+	logic,
+	mapentities
 };
 
 namespace deserial {
@@ -44,8 +49,7 @@ namespace deserial {
 	extern const std::unordered_map<uint32_t, deserialTypeInfo> typeInfoPtrMap;
 
 	/* Populated before deserialization occurs */
-	extern std::unordered_map<uint64_t, std::string> declHashMap;
-	extern std::unordered_map<uint64_t, std::string> modelHashMap;
+	extern std::unordered_map<uint64_t, std::string> declHashMap; // More accurately described as a hashmap of all resource dependencies
 	extern std::unordered_map<uint64_t, entityclass_t> entityclassmap;
 
 	void SetDeserialMode(DeserialMode newmode);
@@ -56,43 +60,47 @@ namespace deserial {
 
 	/* Entry Points */
 	void ds_start_entitydef(BinaryReader& reader, std::string& writeTo, uint64_t entityhash);
+	void ds_start_mapentities(BinaryReader& reader, std::string& writeTo);
 	void ds_start_logicdecl(BinaryReader& reader, std::string& writeTo, LogicType declclass);
 
-	/* Common Types */
-	void ds_pointerbase(BinaryReader& reader, std::string& writeTo);
-	void ds_pointeridStaticModel(BinaryReader& reader, std::string& writeTo);
-	void ds_pointerdeclinfo(BinaryReader& reader, std::string& writeTo);
-	void ds_pointerdecl(BinaryReader& reader, std::string& writeTo);
-	void ds_idTypeInfoPtr(BinaryReader& reader, std::string& writeTo);
-	void ds_idTypeInfoObjectPtr(BinaryReader& reader, std::string& writeTo);
+	/* Pointers */
+	dsfunc_t ds_pointerbase;
+	dsfunc_t ds_pointerdeclinfo;
+	dsfunc_t ds_pointerdecl;
+
+	/* Polymorphic Types */
+	dsfunc_t ds_idTypeInfoPtr;
+	dsfunc_t ds_idTypeInfoObjectPtr;
+
+	/* Containers */
 	void ds_enumbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, const char*>& enumMap);
-	void ds_blockbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap);
-	void ds_structbase(BinaryReader& reader, std::string& writeTo, const std::unordered_map<uint64_t, deserializer>& propMap);
-	void ds_idList(BinaryReader& reader, std::string& writeTo, void(*callback)(BinaryReader& reader, std::string& writeTo));
+	void ds_structbase(BinaryReader& reader, std::string& writeTo, const dspropmap_t& propMap);
+	void ds_idList(BinaryReader& reader, std::string& writeTo, dsfunc_t* callback);
 	void ds_staticList(BinaryReader& reader, std::string& writeTo, deserializer basetype);
-	void ds_idListMap(BinaryReader& reader, std::string& writeTo, void(*keyfunc)(BinaryReader& reader, std::string& writeTo), void(*valuefunc)(BinaryReader& reader, std::string& writeTo));
+	void ds_idListMap(BinaryReader& reader, std::string& writeTo, dsfunc_t* keyfunc, dsfunc_t* valuefunc);
 	
 	/* Manually Implemented Structs */
-	void ds_idStr(BinaryReader& reader, std::string& writeTo);
-	void ds_attachParent_t(BinaryReader& reader, std::string& writeTo);
-	void ds_idRenderModelWeakHandle(BinaryReader& reader, std::string& writeTo);
-	void ds_idLogicProperties(BinaryReader& reader, std::string& writeTo);
+	dsfunc_t ds_idStr;
+	dsfunc_t ds_attachParent_t;
+	dsfunc_t ds_idRenderModelWeakHandle;
+	dsfunc_t ds_idLogicProperties;
+	dsfunc_t ds_idEventArg;
 
 	/* Primitive Types */
-	void ds_bool(BinaryReader& reader, std::string& writeTo);
-	void ds_char(BinaryReader& reader, std::string& writeTo);
-	void ds_unsigned_char(BinaryReader& reader, std::string& writeTo);
-	void ds_wchar_t(BinaryReader& reader, std::string& writeTo);
-	void ds_short(BinaryReader& reader, std::string& writeTo);
-	void ds_unsigned_short(BinaryReader& reader, std::string& writeTo);
-	void ds_int(BinaryReader& reader, std::string& writeTo);
-	void ds_unsigned_int(BinaryReader& reader, std::string& writeTo);
-	void ds_long(BinaryReader& reader, std::string& writeTo);
-	void ds_long_long(BinaryReader& reader, std::string& writeTo);
-	void ds_unsigned_long(BinaryReader& reader, std::string& writeTo);
-	void ds_unsigned_long_long(BinaryReader& reader, std::string& writeTo);
-	void ds_float(BinaryReader& reader, std::string& writeTo);
-	void ds_double(BinaryReader& reader, std::string& writeTo);
+	dsfunc_t ds_bool;
+	dsfunc_t ds_char;
+	dsfunc_t ds_unsigned_char;
+	dsfunc_t ds_wchar_t;
+	dsfunc_t ds_short;
+	dsfunc_t ds_unsigned_short;
+	dsfunc_t ds_int;
+	dsfunc_t ds_unsigned_int;
+	dsfunc_t ds_long;
+	dsfunc_t ds_long_long;
+	dsfunc_t ds_unsigned_long;
+	dsfunc_t ds_unsigned_long_long;
+	dsfunc_t ds_float;
+	dsfunc_t ds_double;
 
 };
 

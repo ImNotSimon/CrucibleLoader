@@ -62,40 +62,6 @@ bool EntNode::ValueInt(int& writeTo, int clampMin, int clampMax) const {
 	return true;
 }
 
-bool EntNode::ValueBool(bool& writeTo) const {
-	if(valLength == 0) return false;
-
-	const char* ptr = textPtr + nameLength;
-
-	if (valLength == 1) {
-		if (*ptr == '0') {
-			writeTo = false;
-			return true;
-		}
-		if (*ptr == '1') {
-			writeTo = true;
-			return true;
-		}
-	}
-
-	if (valLength == 4) {
-		if (memcmp(ptr, "true", 4) == 0) {
-			writeTo = true;
-			return true;
-		}
-	}
-
-	if (valLength == 5) {
-		if (memcmp(ptr, "false", 5) == 0) {
-			writeTo = false;
-			return true;
-		}
-	}
-
-	return false;
-}
-
-
 bool EntNode::findPositionalID(EntNode* n, int& id)
 {
 	// We're not doing any undo/redo here, and this function is slowing everything down

@@ -4,6 +4,7 @@
 #include <fstream>
 #include <chrono>
 #include <cassert>
+#include <set>
 #include "archives/ResourceStructs.h"
 #include "archives/PackageMapSpec.h"
 #include "staticsparser.h"
@@ -24,75 +25,6 @@
 	printf("%s: %zu", msg, duration.count());\
 }
 
-void deserialTest() {
-	const char* dir = "D:/DA/atlan/entityDef";
-	std::string derp;
-
-	int totaldeserialized = 0;
-	int i = 0;
-
-	while (totaldeserialized < deserial::entityclassmap.size()) {
-		for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
-			//if(++i % 100 == 0)
-			//	printf("%d\n", i);
-			if (entry.is_directory())
-				continue;
-
-
-			std::string pathString = entry.path().string();
-			uint64_t farmhash;
-			{
-				std::string hashstring = pathString.substr(pathString.find("entityDef") + 10); // Get past the slash
-				for (char& c : hashstring) {
-					if(c == '\\')
-						c = '/';
-				}
-				
-				size_t periodIndex = hashstring.find_last_of('.');
-				std::string_view typeview = "entityDef";
-				std::string_view nameview(hashstring.data(), periodIndex);
-				//std::cout << nameview << "\n";
-				farmhash = HashLib::DeclHash(typeview, nameview);
-			}
-
-			// Skip if this has already been deserialized
-			auto iter_current = deserial::entityclassmap.find(farmhash);
-			assert(iter_current != deserial::entityclassmap.end());
-			if(iter_current->second.deserialized)
-				continue;
-
-			// Do not deserialize if the parent isn't deserialized
-			auto iter_parent = deserial::entityclassmap.find(iter_current->second.parent);
-			if(iter_parent != deserial::entityclassmap.end()) {
-				if (!iter_parent->second.deserialized)
-					continue;
-			}
-
-
-			int previousWarningCount = deserial::ds_debugWarningCount();
-
-			BinaryOpener opener = BinaryOpener(entry.path().string());
-			BinaryReader reader = opener.ToReader();
-			derp.push_back('"');
-			derp.append(entry.path().string());
-			derp.append("\" = {");
-			deserial::ds_start_entitydef(reader, derp, farmhash);
-			derp.append("}\n");
-
-			if (previousWarningCount != deserial::ds_debugWarningCount())
-				printf("%s\n", pathString.c_str());
-			totaldeserialized++;
-			iter_current->second.deserialized = true;
-		}
-	}
-
-	std::ofstream output;
-	output.open("../input/deserialoutput.txt", std::ios_base::binary);
-	output << derp;
-	output.close();
-	deserial::ds_debugging();
-}
-
 void StaticsTest() {
 	BinaryOpener filedata("input/m2_hebeth.mapentities");
 	BinaryReader r = filedata.ToReader();
@@ -100,62 +32,99 @@ void StaticsTest() {
 	StaticsParser::Parse(r);
 }
 
-void BuildDeclHashmap(const fspath decldir, const char* prepend, const std::unordered_map<std::string, std::string>& deptypemap) {
+void AddDeclHash(const char* typestring, const char* namestring)
+{
+	uint64_t filehash = HashLib::DeclHash(typestring, namestring);
+	std::string hashString = typestring;
+	hashString.push_back('/');
+	hashString.append(namestring);
+
+	const auto& iter = deserial::declHashMap.find(filehash);
+	assert(iter == deserial::declHashMap.end() || iter->second == hashString);
+	deserial::declHashMap.emplace(filehash, hashString);
+}
+
+void BuildDeclHashmap(const fspath gamedir) {
+	std::cout << "Building Decl Farmhash Map\n";
+	const std::vector<std::string> archiveList = PackageMapSpec::GetPrioritizedArchiveList(gamedir);
+	const fspath basepath = gamedir / "base";
+	deserial::declHashMap.reserve(15000);
+
+	const std::set<std::string> ValidTypes = {"mapentities", "entityDef", "logicFX", "logicLibrary", "logicClass", "logicUIWidget", "logicEntity"};
+
+	for (const std::string& archivename : archiveList) {
+		ResourceArchive r;
+		Read_ResourceArchive(r, basepath / archivename, RF_SkipData);
+
+		for (uint32_t i = 0; i < r.header.numResources; i++) {
+			const ResourceEntry& e = r.entries[i];
+
+			const char* typestring, *namestring;
+			Get_EntryStrings(r, e, typestring, namestring);
+
+			if(ValidTypes.count(typestring) == 0)
+				continue;
+
+			AddDeclHash(typestring, namestring);
+			
+			for (uint32_t k = 0; k < e.numDependencies; k++) {
+				uint32_t depindex = r.dependencyIndex[e.depIndices + k];
+				const ResourceDependency& d = r.dependencies[depindex];
+
+				const char* deptypestring = r.stringChunk.dataBlock + r.stringChunk.offsets[d.type];
+				const char* depnamestring = r.stringChunk.dataBlock + r.stringChunk.offsets[d.name];
+
+				AddDeclHash(deptypestring, depnamestring);
+			}
+		}
+	}
+
+	std::cout << "Decl Hash Map Size: " << deserial::declHashMap.size() << "\n";
+	//for (const auto& pair : deserial::declHashMap) {
+	//	std::cout << pair.second << "\n";
+	//}
+}
+
+void BuildEntityClassMap(const fspath entitydir) {
+	std::cout << "Building Entity Class Map\n";
+
+	deserial::entityclassmap.reserve(5000);
+
+	/*
+	* STEP 1: Iterate through all entityDef files and extract their class
+	* information if it exists
+	*/
 	using namespace std::filesystem;
-
-	bool isentity = strcmp(prepend, "entitydef") == 0;
-	if(isentity)
-		deserial::entityclassmap.reserve(5000);
-
-	for (const directory_entry& decl : recursive_directory_iterator(decldir)) {
+	for (const directory_entry& decl : recursive_directory_iterator(entitydir)) {
 		if(is_directory(decl))
 			continue;
 
 		std::string declpath = decl.path().string();
-		declpath = declpath.substr(decldir.string().size());
-		declpath.insert(0, prepend);
+		declpath = declpath.substr(entitydir.string().size() + 1); // +1 to eliminate the leading slash
 		for (char& c : declpath) {
 			if(c == '\\')
 				c = '/';
 		}
 
 		size_t periodindex = declpath.size() - 5; // length of ".decl"
-		size_t slashindex = declpath.find('/');
 		assert(declpath[periodindex] == '.');
-		assert(slashindex != std::string_view::npos);
 		
-		std::string_view typeview(declpath.data(), slashindex);
-		std::string_view nameview(declpath.data() + slashindex + 1, periodindex - slashindex - 1);
-
-		// Get the camelcased type
-		const auto& iter = deptypemap.find(std::string(typeview));
-		assert(iter != deptypemap.end());
-		typeview = std::string_view(iter->second.data(), iter->second.size());
-
-
-
-		uint64_t farmhash = HashLib::DeclHash(typeview, nameview);
-		std::string mapstring = std::string(typeview);
-		mapstring.push_back('/');
-		mapstring.append(nameview);
-
-		deserial::declHashMap.emplace(farmhash, mapstring);
-
-		//std::cout << declpath << "\n";
-		//std::cout << typeview << " " << nameview << "\n";
-		//std::cout << mapstring << "\n";
+		std::string_view typeview = "entityDef";
+		std::string_view nameview(declpath.data(), periodindex);
+		//std::cout << nameview << "\n";
+		uint64_t farmhash = HashLib::DeclHash("entityDef", nameview);
 
 		/*
 		* Perform the initial population of the entity class map
 		* To do this we do a hacky read-through of the entitydef
 		* to extract the inheritance hash and class hash (if it exists)
 		*/
-		if (isentity) {
-			
+		{
 			BinaryOpener open(decl.path().string());
 			assert(open.Okay());
 
 			entityclass_t classdef;
+			classdef.filepath = decl.path().string();
 			uint64_t temphash;
 			uint32_t length;
 
@@ -187,92 +156,10 @@ void BuildDeclHashmap(const fspath decldir, const char* prepend, const std::unor
 			//	std::cout << "MISSING\n";
 		}
 	}
-}
 
-void BuildDeclHashmap(const fspath gamedir) {
-	std::cout << "Building Decl Farmhash Map\n";
-	const std::vector<std::string> archiveList = PackageMapSpec::GetPrioritizedArchiveList(gamedir);
-	const fspath basepath = gamedir / "base";
-	deserial::modelHashMap.reserve(15000);
-
-	// Map of lowercase decl folder types to their camelcased versions
-	std::unordered_map<std::string, std::string> deptypemap;
-
-	for(const std::string& archivename : archiveList) {
-		ResourceArchive r;
-		Read_ResourceArchive(r, basepath / archivename, RF_SkipData);
-
-		/* Get the camel-cased type strings */
-		for(uint32_t i = 0; i < r.header.numDependencies; i++) {
-			const ResourceDependency& d = r.dependencies[i];
-
-			const char* typeString = r.stringChunk.dataBlock + r.stringChunk.offsets[d.type];
-
-			std::string lowercase = typeString;
-			for(char & c : lowercase) {
-				if(c <= 'Z' && c >= 'A')
-					c += 32;
-			}
-			deptypemap.emplace(lowercase, typeString);
-		}
-
-		/* Get the list of model paths */
-		for (uint32_t i = 0; i < r.header.numResources; i++) {
-			const ResourceEntry& e = r.entries[i];
-
-			const char* typestring, *namestring;
-			Get_EntryStrings(r, e, typestring, namestring);
-
-			if (strcmp("model", typestring) == 0) {
-				uint64_t farmhash = HashLib::DeclHash("model", namestring);
-				deserial::modelHashMap.emplace(farmhash, namestring);
-			}
-		}
-	}
-
-	std:: cout << "Model Path Hashmap Size: " << deserial::modelHashMap.size() << "\n";
-
-	//for(const std::string& s : deptypes)
-	//	std::cout << s << "\n";
-
-	using namespace std::filesystem;
-	const fspath decldir = "D:/DA/atlan/rs_streamfile/generated/decls/";
-	assert(is_directory(decldir));
-
-	// Add all decl folders missing from the map - assuming an all-lowercase camelcasing
-	for(const directory_entry& decldir : directory_iterator(decldir)) {
-		std::string dirstring = decldir.path().filename().string();
-		if(deptypemap.count(dirstring) == 0) {
-			//std::cout << decldir.path().filename() << "\n";
-			deptypemap.emplace(dirstring, dirstring);
-		}	
-	}
-
-	// TODO: This would be the place to manually adjust any camelcasings if needed
-	//deptypemap["aicomponent_lasertargeter"] = "aiComponent_laserTargeter";
-
-	const fspath entitydir = "D:/DA/atlan/entityDef";
-	const fspath logicentitydir = "D:/DA/atlan/logicEntity";
-	const fspath logicfxdir = "D:/DA/atlan/logicFX";
-	const fspath logicwidgetdir = "D:/DA/atlan/logicUIWidget";
-	const fspath logicclassdir = "D:/DA/atlan/logicClass";
-	const fspath logiclibrarydir = "D:/DA/atlan/logicLibrary";
-
-	deserial::declHashMap.reserve(100000);
-	// Get every decl hash
-	BuildDeclHashmap(decldir, "", deptypemap);
-	BuildDeclHashmap(entitydir, "entitydef", deptypemap);
-	BuildDeclHashmap(logicentitydir, "logicentity", deptypemap);
-	BuildDeclHashmap(logicfxdir, "logicfx", deptypemap);
-	BuildDeclHashmap(logicwidgetdir, "logicuiwidget", deptypemap);
-	BuildDeclHashmap(logicclassdir, "logicclass", deptypemap);
-	BuildDeclHashmap(logiclibrarydir, "logiclibrary", deptypemap);
-
-	std::cout << "Farmhash Map Size: " << deserial::declHashMap.size() << "\n";
-}
-
-void CompleteEntityClassMap() {
-	std::cout << "Completing Entity Class Map\n";
+	/*
+	* STEP 2: Populate inherited typehash information
+	*/
 	for (auto& current : deserial::entityclassmap) {
 		if(current.second.typehash != 0)
 			continue;
@@ -297,7 +184,91 @@ void CompleteEntityClassMap() {
 	}
 }
 
-void logictests() {
+void DeserializeEntitydefs() {
+	deserial::SetDeserialMode(DeserialMode::entitydef);
+	std::string derp;
+
+	int totaldeserialized = 0;
+
+	while (totaldeserialized < deserial::entityclassmap.size()) {
+
+		for (auto& entitydef : deserial::entityclassmap) {
+
+			// Skip this entity if it's already been deserialized
+			if(entitydef.second.deserialized)
+				continue;
+
+			// Do not deserialize if the parent isn't deserialized
+			const auto parententity = deserial::entityclassmap.find(entitydef.second.parent);
+			if (parententity != deserial::entityclassmap.end()) {
+				if(!parententity->second.deserialized)
+					continue;
+			}
+
+
+			int previousWarningCount = deserial::ds_debugWarningCount();
+
+			BinaryOpener opener = BinaryOpener(entitydef.second.filepath);
+			assert(opener.Okay());
+			BinaryReader reader = opener.ToReader();
+			derp.push_back('"');
+			derp.append(entitydef.second.filepath);
+			derp.append("\" = {");
+			deserial::ds_start_entitydef(reader, derp, entitydef.first);
+			derp.append("}\n");
+
+			if (previousWarningCount != deserial::ds_debugWarningCount())
+				printf("%s\n", entitydef.second.filepath.c_str());
+			totaldeserialized++;
+			entitydef.second.deserialized = true;
+		}
+	}
+
+	std::ofstream output;
+	output.open("../input/deserialoutput.txt", std::ios_base::binary);
+	output << derp;
+	output.close();
+	deserial::ds_debugging();
+}
+
+void DeserializeMapEntities() {
+	deserial::SetDeserialMode(DeserialMode::mapentities);
+
+	const fspath dir = "D:/DA/atlan/mapentities";
+	const fspath outdir = "../input/ents";
+
+	using namespace std::filesystem;
+	for (const directory_entry& entry : recursive_directory_iterator(dir)) {
+		if(is_directory(entry))
+			continue;
+
+		// Finding a fake submap
+		if(entry.path().string().find("styx") != -1)
+			continue;
+
+		const fspath file = entry.path();
+		std::cout << file << "\n";
+
+		BinaryOpener open(file.string());
+		assert(open.Okay());
+		BinaryReader reader = open.ToReader();
+		std::string outtext;
+		outtext.reserve(30000000);
+		deserial::ds_start_mapentities(reader, outtext);
+
+		fspath outpath = outdir / file.filename();
+		outpath = outpath.replace_extension("txt");
+		std::ofstream outfile(outpath, std::ios_base::binary);
+		outfile << outtext;
+		outfile.close();
+	}
+
+	std::cout << deserial::ds_debugWarningCount();
+}
+
+void DeserializeLogicdecls() {
+	deserial::SetDeserialMode(DeserialMode::logic);
+
 	const fspath atlandir = "D:/DA/atlan";
 	const fspath classfolders[LT_MAXIMUM] = {"logicClass", "logicEntity", "logicFX", "logicLibrary", "logicUIWidget"};
 	const fspath outpaths[LT_MAXIMUM] = {"../input/atlan_logicclass.txt", "../input/atlan_logicentity.txt", "../input/atlan_logicfx.txt", "../input/atlan_logiclibrary.txt", "../input/atlan_logicwidget.txt"};
@@ -346,13 +317,11 @@ void logictests() {
 
 int main() {
 	BuildDeclHashmap("D:/Steam/steamapps/common/DOOMTheDarkAges");
-	CompleteEntityClassMap();
-	deserialTest();
+	BuildEntityClassMap("D:/DA/atlan/entityDef");
+	//DeserializeEntitydefs();
+	//DeserializeLogicdecls();
 
+	DeserializeMapEntities();
 
-	//deserial::SetDeserialMode(DeserialMode::logic);
-	//logictests();
-
-	//std::cout << HashLib::FarmHash64("idDeclAIComponent_LaserTargeter", strlen("idDeclAIComponent_LaserTargeter"));
 	return 0;
 }

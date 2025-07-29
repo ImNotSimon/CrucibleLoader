@@ -27,7 +27,8 @@ const std::set<std::string> ForcedExclusions = {
 	"idStr",
 	"idLogicProperties",
 	"attachParent_t",
-	"idRenderModelWeakHandle"
+	"idRenderModelWeakHandle",
+	"idEventArg"
 };
 
 // For any structs that weren't included for whatever reason, but need to be
@@ -38,7 +39,8 @@ const std::set<std::string> ForcedInclusions = {
 	"idDeclLogicLibrary",
 	"idDeclLogicFX",
 	"idDeclLogicEntity",
-	"idDeclLogicUIWidget"
+	"idDeclLogicUIWidget",
+	"encounterLogicOperator_t"
 };
 
 // Instead of generating unique reflection functions, key structs' body functions
@@ -57,9 +59,52 @@ const std::unordered_map<std::string, const char*> AliasStructs = {
 	{"idTypesafeTime_T_int___millisecondUnique_t___1000_T", "int"},
 	{"idTypesafeTime_T_float___secondUnique_t___1_T", "float"},
 
+	// Some are aliased to their literal type, but scene director-related nodes 
+	// have no aliasing
+	{"idTypesafeNumber_T_float___RadiansUnique_t_T", "float"},
+	{"idTypesafeNumber_T_float___DegreesUnique_t_T", "float"},
+	{"idTypesafeNumber_T_float___RadiusUnique_t_T", "float"},
+	{"idTypesafeNumber_T_float___SphereUnique_t_T", "float"},
+	{"idTypesafeNumber_T_float___LightUnitsUnique_t_T", "float"},
+
+	// TODO: These are for eventcalls. Must get these hashes
+	{"idHandle_T_short___invalidEvent_t___INVALID_EVENT_HANDLE_T", "unsigned_int"},
+
 	// TODO: Monitor. Same issue as idRenderModelWeakHandle - block is always empty 
 	{"idFxHandle", "idRenderModelWeakHandle"}
 
+};
+
+// These types are used in idTypeInfoObjectPtrs. We must forcibly include
+// them and all their descendant types
+// (Auto-including every TypeInfoObjectPtr class hierarchy would massively bloat
+// the reflection code. Trying to avoid this by only including what is actually encountered for now)
+const std::set<std::string> PolymorphicInclusions = {
+	"idLogicVariableModel",
+	"idTriggerBodyData",
+	"idTransportComponent",
+	"idEntityModifier_AI_Buff",
+	"idPhysicsEditorConstraintDef",
+	"idCollision_Animated",
+	"idAICondition",
+	"idLogicGraphAssetClassMain",
+	"idLogicNodeModel",
+	"idLogicGraphAssetState",
+	"idLogicGraphAssetFunction",
+	"idLogicGUIItem",
+	"idQuestUIData",
+	"idAISnippet",
+	"idLogicDebugGeometry",
+	"idLogicGraphAssetEvent",
+	"idUICommand",
+};
+
+// Manual Pointer Functions
+const std::unordered_map<std::string, std::string> PointerFunctionMap = {
+	{"idStaticModel", "pointerdecl"},
+	{"idMD6Anim", "pointerdecl"},
+	{"idCVar", "idStr"},
+	{"idDeclInfo", "pointerdeclinfo"},
 };
 
 
@@ -385,23 +430,6 @@ void idlibCleaner2::RecurseTemplates() {
 	// This will more than double the amount of included types - and increases runtime of this phase
 	// To try and avoid doing this for as long as possible, I'll attempt to only include types which are actually encountered
 	// Also, this probably only needs to run once - should monitor and see
-	int childrenIncludes = IncludeDescendantsOf("idLogicVariableModel");
-	childrenIncludes += IncludeDescendantsOf("idTriggerBodyData");
-	childrenIncludes += IncludeDescendantsOf("idTransportComponent");
-	childrenIncludes += IncludeDescendantsOf("idEntityModifier_AI_Buff");
-	childrenIncludes += IncludeDescendantsOf("idPhysicsEditorConstraintDef");
-	childrenIncludes += IncludeDescendantsOf("idCollision_Animated");
-	childrenIncludes += IncludeDescendantsOf("idAICondition");
-	childrenIncludes += IncludeDescendantsOf("idLogicGraphAssetClassMain");
-	childrenIncludes += IncludeDescendantsOf("idLogicNodeModel");
-	childrenIncludes += IncludeDescendantsOf("idLogicGraphAssetState");
-	childrenIncludes += IncludeDescendantsOf("idLogicGraphAssetFunction");
-	childrenIncludes += IncludeDescendantsOf("idLogicGUIItem");
-	childrenIncludes += IncludeDescendantsOf("idQuestUIData");
-	childrenIncludes += IncludeDescendantsOf("idAISnippet");
-	childrenIncludes += IncludeDescendantsOf("idLogicDebugGeometry");
-	childrenIncludes += IncludeDescendantsOf("idLogicGraphAssetEvent");
-	childrenIncludes += IncludeDescendantsOf("idUICommand");
 
 	//printf("In looping hell\n");
 	//EntNode& idTypeInfoObjectPtrs = templates["idTypeInfoObjectPtr"];
@@ -448,6 +476,20 @@ void idlibCleaner2::ApplyManualSettings()
 		assert(iter != typelib.end());
 		iter->second.alias = pair.second;
 	}
+
+	for (const std::string& s : PolymorphicInclusions) {
+		IncludeDescendantsOf(s);
+	}
+
+	for (const auto& pair : PointerFunctionMap) {
+		auto iter = typelib.find(pair.first);
+		assert(iter!= typelib.end());
+
+		std::string functext = "pointerfunc = ";
+		functext.append(pair.second);
+
+		parser.EditTree(functext, iter->second.node, 0, 0, 0, 0);
+	}
 }
 
 void idlibCleaner2::Build() {
@@ -493,28 +535,10 @@ void idlibCleaner2::Build() {
 	//printf("Iterating over special types\n");
 	RecurseTemplates();
 
-	// TODO FOR ENTITYSLAYER: This really exposes how horrible findPositionalId is - need to refactor
-	// it and the history system that uses it
-
 	// TODO: This is too overzealous - it's excluding entity classes
 	// Seems better now after manually including entity classes - continue to monitor
 	printf("Adding Include Tags\n");
 	int includeCount = 0;
-
-	/* Manual Edits Go Here */
-	{
-		auto iter = typelib.find("idStaticModel");
-		assert(iter != typelib.end());
-		parser.EditTree("pointerfunc = pointeridStaticModel", iter->second.node, 0, 0, 0, 0);
-
-		iter = typelib.find("idCVar");
-		assert(iter != typelib.end());
-		parser.EditTree("pointerfunc = idStr", iter->second.node, 0, 0, 0, 0);
-
-		iter = typelib.find("idDeclInfo");
-		assert(iter != typelib.end());
-		parser.EditTree("pointerfunc = pointerdeclinfo", iter->second.node, 0, 0, 0, 0);
-	}
 
 	for (auto& pair : typelib)
 	{
