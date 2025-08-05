@@ -9,6 +9,7 @@ reflector/bin/*
 input/*
 
 oo2core_9_win64.dll
+extractor_log.txt
 modloader_log.txt
 modloader_cache.bin
 DarkAgesPatcher.def

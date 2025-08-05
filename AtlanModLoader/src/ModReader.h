@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <unordered_map>
 
 struct ModDef;
 struct ModFile;
@@ -7,14 +8,23 @@ struct ModFile;
 typedef std::filesystem::path fspath;
 
 enum class ModFileType : uint8_t {
-	rs_streamfile = 0,
-	entityDef = 1
+	rs_streamfile,
+	entityDef,
+	mapentities,
+	image
 };
 
-// MUST MATCH THE ORDER / INDICES OF THE ABOVE ENUM
-inline const char* ModFileTypeStrings[] = {
-	"rs_streamfile",
-	"entityDef"
+enum resourcetypeflags_t {
+	RTF_None = 0,
+	RTF_NoExtension = 1 << 0,
+	RTF_Disabled = 1 << 1
+};
+
+struct resourcetypeinfo_t {
+	std::string_view typestring;
+	int typeflags; // resourcetypeflags_t
+	ModFileType typeenum;
+
 };
 
 struct ModDef {
@@ -24,7 +34,7 @@ struct ModDef {
 };
 
 struct ModFile {
-	ModFileType assetType;
+	const resourcetypeinfo_t* typedata = nullptr;
 	ModDef* parentMod = nullptr;
 	void* dataBuffer = nullptr;
 	size_t dataLength = 0;
@@ -45,6 +55,6 @@ inline void ModDef_Free(ModDef& mod) {
 
 namespace ModReader {
 	
-	void ReadLooseMod(ModDef& readto, const fspath& tempzippath, const std::vector<fspath>& pathlist, int argflags);
+	void ReadLooseMod(ModDef& readto, const fspath& modsfolder, const std::vector<fspath>& pathlist, int argflags);
 	void ReadZipMod(ModDef& readto, const fspath& zipPath, int argflags);
 }
