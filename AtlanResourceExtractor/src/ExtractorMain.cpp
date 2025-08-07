@@ -20,78 +20,6 @@ struct configdata_t {
 
 };
 
-void ExtractFiles(std::filesystem::path outputDir, const ResourceArchive& r, const restypeset_t& validTypes) {
-	int fileCount = 0;
-
-	char* decompBlob = nullptr;
-	size_t decompSize = 0;
-
-	for (uint64_t i = 0; i < r.header.numResources; i++) {
-		ResourceEntry& e = r.entries[i];
-		const char* typeString = nullptr, *nameString = nullptr;
-		Get_EntryStrings(r, e, typeString, nameString);
-
-		// Set output path based on file type
-		if(validTypes.count(typeString) == 0)
-			continue;
-		fspath fileDir = outputDir / typeString;
-		fspath assetpath(nameString);
-
-		if (!assetpath.has_extension()) {
-			if(strcmp(typeString, "mapentities") == 0)
-				assetpath.replace_extension(".entities");
-			else assetpath.replace_extension(".decl");
-		}
-
-		if (assetpath.has_parent_path()) {
-			fileDir /= assetpath.parent_path();
-		}
-
-		const fspath output_path = fileDir / assetpath.filename();
-		if (output_path.string().length() > 250)
-			atlog << "WARNING: Filepath " << output_path << " exceeding safe limit. Unexpected behavior may occur\n";
-
-		// Normal for this to return false on success, for whatever reason
-		std::filesystem::create_directories(fileDir);
-
-		char* dataLocation = r.bufferData + (e.dataOffset - r.header.dataOffset);
-		std::ofstream outputFile(output_path, std::ios_base::binary);
-
-		switch(e.compMode) {
-			
-			default:
-			atlog << "ERROR: Unknown compression format " << e.compMode << " on file " << output_path;
-
-			case 0:
-			outputFile.write(dataLocation, e.dataSize);
-			break;
-
-			case 4:
-			dataLocation += 12;
-			case 2:
-			{
-				if(decompSize < e.uncompressedSize) {
-					delete[] decompBlob;
-					decompBlob = new char[e.uncompressedSize];
-					decompSize = e.uncompressedSize;
-				}
-				bool success = Oodle::DecompressBuffer(dataLocation, e.dataSize - (e.compMode == 4 ? 12 : 0), decompBlob, e.uncompressedSize);
-				if(!success)
-					atlog << "Oodle Decompression Failed for " << (fileDir / assetpath.filename()) << "\n";
-				outputFile.write(decompBlob, e.uncompressedSize);
-			}
-			break;
-		}
-
-
-		outputFile.close();
-		fileCount++;
-	}
-
-	delete[] decompBlob;
-	atlog << "Dumped " << fileCount << " files from archive\n";
-}
-
 /*
 * CONSOLIDATED RESOURCE EXTRACTOR FUNCTION
 */
@@ -107,7 +35,12 @@ void ExtractorMain() {
 	configdata_t config;
 	try
 	{
+		#ifdef _DEBUG
+		#define configpath "extractor_config_debug.txt"
+		#else
 		#define configpath "extractor_config.txt"
+		#endif
+
 		EntityParser parser(configpath, ParsingMode::PERMISSIVE);
 
 		EntNode& root = *parser.getRoot();
@@ -206,18 +139,84 @@ void ExtractorMain() {
 		atlog << "Performing resource extraction\n";
 
 		const fspath basepath = config.inputdir / "base";
+		std::set<std::string> extractedfiles;
 
-		for (int i = (int)packages.size() - 1; i > -1; i--) {
+		size_t compsize = 24000;
+		size_t decompsize = 24000;
+		char* compbuffer = new char[compsize];
+		char* decompbuffer = new char[decompsize];
 
-			std::filesystem::path resPath = basepath / packages[i];
-			atlog << "Dumping: " << resPath.string() << "\n";
+		for(size_t i = 0; i < packages.size(); i++) {
+			fspath respath = basepath / packages[i];
+			int filecount = 0;
 
-			// Parse the archive
+			atlog << "Extracting from " << respath.filename() << "\n";
+
 			ResourceArchive archive;
-			Read_ResourceArchive(archive, resPath.string(), RF_ReadEverything);
+			Read_ResourceArchive(archive, respath.string(), RF_SkipData);
+			std::ifstream archivestream(respath, std::ios_base::binary);
 
-			ExtractFiles(config.outputdir, archive, config.restypes);
+			for(uint32_t entryindex = 0; entryindex < archive.header.numResources; entryindex++) {
+				const ResourceEntry& e = archive.entries[entryindex];
+
+				const char* typestring, *namestring;
+				Get_EntryStrings(archive, e, typestring, namestring);
+
+				// Don't extract files with undesired types
+				if (config.restypes.count(typestring) == 0)
+					continue;
+
+				// Only proceed if a higher-priority archive doesn't have this file
+				{
+					std::string setstring = typestring;
+					setstring.push_back('/');
+					setstring.append(namestring);
+
+					
+					if (extractedfiles.count(setstring) != 0)
+						continue;
+					extractedfiles.insert(setstring);
+					filecount++;
+				}
+
+				// Setup the output path
+				fspath output_path = (config.outputdir / typestring) / namestring;
+				{
+					if (!output_path.has_extension()) {
+						output_path.replace_extension(".bin");
+					}
+					std::filesystem::create_directories(output_path.parent_path());
+
+					if (output_path.string().length() > 250)
+						atlog << "WARNING: Filepath " << output_path << " exceeding safe limit. Unexpected behavior may occur\n";
+				}
+
+
+				// Get the entry data
+				ResourceEntryData_t entrydata = Get_EntryData(e, archivestream, compbuffer, compsize, decompbuffer, decompsize);
+				if (entrydata.returncode != EntryDataCode::OK) {
+					if(entrydata.returncode == EntryDataCode::UNKNOWN_COMPRESSION) {
+						atlog << "ERROR: Unknown compression format " << e.compMode << " on file " << output_path << "\n";
+					}
+					else {
+						atlog << "ERROR: Failure code " << static_cast<int>(entrydata.returncode) << " on file " << output_path << "\n";
+						continue;
+					}
+				}
+
+				// Write the file
+				std::ofstream outputstream(output_path, std::ios_base::binary);
+				outputstream.write(entrydata.buffer, entrydata.length);
+				outputstream.close();
+			}
+
+			atlog << "Extracted " << filecount << " files from archive\n";
 		}
+
+		delete[] compbuffer;
+		delete[] decompbuffer;
+
+		atlog << "Extraction Complete: " << extractedfiles.size() << " files extracted in total\n";
 	}
 	else {
 		atlog << "Skipping resource extraction\n";
@@ -226,6 +225,12 @@ void ExtractorMain() {
 
 int main(int argc, char* argv[]) {
 	#define logpath "extractor_log.txt"
+
+	#ifdef _DEBUG
+	AtlanLogger::init(logpath);
+	ExtractorMain();
+	AtlanLogger::exit();
+	#else
 
 	try {
 		AtlanLogger::init(logpath);
@@ -241,8 +246,6 @@ int main(int argc, char* argv[]) {
 	atlog << "Output written to " << logpath << "\n";
 	AtlanLogger::exit();
 	
-
-	#ifndef _DEBUG
 	std::this_thread::sleep_for(std::chrono::seconds(10));
 	#endif
 }

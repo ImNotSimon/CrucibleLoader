@@ -52,11 +52,12 @@ namespace deserial {
 	extern std::unordered_map<uint64_t, std::string> declHashMap; // More accurately described as a hashmap of all resource dependencies
 	extern std::unordered_map<uint64_t, entityclass_t> entityclassmap;
 
-	void SetDeserialMode(DeserialMode newmode);
+	/* Configuration Settings*/
+	extern thread_local DeserialMode deserialmode;
+	extern thread_local bool include_originals;
 	
 	/* Debugging */
-	void ds_debugging();
-	int ds_debugWarningCount();
+	extern thread_local int warning_count;
 
 	/* Entry Points */
 	void ds_start_entitydef(BinaryReader& reader, std::string& writeTo, uint64_t entityhash);

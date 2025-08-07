@@ -103,6 +103,7 @@ const std::set<std::string> PolymorphicInclusions = {
 const std::unordered_map<std::string, std::string> PointerFunctionMap = {
 	{"idStaticModel", "pointerdecl"},
 	{"idMD6Anim", "pointerdecl"},
+	{"idColorLUT", "pointerdecl"},
 	{"idCVar", "idStr"},
 	{"idDeclInfo", "pointerdeclinfo"},
 };

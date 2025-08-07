@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <iosfwd>
 
 typedef std::filesystem::path fspath;
 
@@ -151,3 +152,46 @@ enum ResourceFlags {
 void Read_ResourceArchive(ResourceArchive& r, const fspath pathString, int flags);
 
 void Get_EntryStrings(const ResourceArchive& r, const ResourceEntry& e, const char*& typeString, const char*& nameString);
+
+
+enum class EntryDataCode {
+	OK,
+	DATA_NOT_READ,
+	UNKNOWN_COMPRESSION,
+	OODLE_ERROR,
+	UNUSED
+};
+
+struct ResourceEntryData_t {
+	EntryDataCode returncode = EntryDataCode::UNUSED;
+	const char* buffer = nullptr;
+	size_t length = 0;
+};
+
+
+/*
+* Returns the correctly decompressed data for a given resource entry.
+* Resource Archive must have it's data section read to memory
+*
+* If data is uncompressed or compression is unknown, returns a pointer within the archive's data buffer
+*
+* If data is compressed, it will be decompressed to the provided dynamically allocated buffer.
+* If the provided buffer is too small, it will be deallocated and replaced with a new buffer to hold the data
+*
+*/
+ResourceEntryData_t Get_EntryData(const ResourceArchive& r, const ResourceEntry& e, char*& decompbuffer, size_t& decompsize);
+
+
+/*
+* Returns the correctly decompressed data for a given resource entry
+*
+* (Use this overload when you haven't read the archive's entire data section to memory
+*	and are reading the entry's data individually to improve performance)
+*
+* If the data is uncompressed or compression is unknown, returns the raw buffer
+* If the data is compressed, it will be decompressed to the decomp buffer
+*
+* If either buffer is too small, it will be deallocated and replaced with a new buffer to hold the data
+*
+*/
+ResourceEntryData_t Get_EntryData(const ResourceEntry& e, std::ifstream& archivestream, char*& raw, size_t& rawsize, char*& decomp, size_t& decompsize);

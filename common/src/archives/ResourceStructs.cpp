@@ -1,5 +1,6 @@
 #include "ResourceStructs.h"
 #include "hash/HashLib.h"
+#include "entityslayer/Oodle.h"
 #include <fstream>
 #include <cassert>
 
@@ -22,6 +23,58 @@ void Get_EntryStrings(const ResourceArchive& r, const ResourceEntry& e, const ch
 	nameString = r.stringChunk.dataBlock + nameOffset;
 
 }
+
+ResourceEntryData_t Get_EntryData_Internal(const ResourceEntry& e, char* raw, char*& buffer, size_t& buffersize) {
+	switch (e.compMode)
+	{
+		default:
+		return {EntryDataCode::UNKNOWN_COMPRESSION, raw, e.dataSize};
+
+		case 0:
+		return {EntryDataCode::OK, raw, e.dataSize};
+
+		case 4:
+		raw += 12;
+		case 2:
+		{
+			if (buffersize < e.uncompressedSize) {
+				delete[] buffer;
+				buffer = new char[e.uncompressedSize];
+				buffersize = e.uncompressedSize;
+			}
+			bool success = Oodle::DecompressBuffer(raw, e.dataSize - (e.compMode == 4 ? 12 : 0), buffer, e.uncompressedSize);
+
+			if(success)
+				return {EntryDataCode::OK, buffer, e.uncompressedSize};
+			return {EntryDataCode::OODLE_ERROR, nullptr, 0};
+		}
+	}
+}
+
+ResourceEntryData_t Get_EntryData(const ResourceArchive& r, const ResourceEntry& e, char*& decompbuffer, size_t& decompsize) {
+	if (!r.bufferData)
+		return { EntryDataCode::DATA_NOT_READ, nullptr, 0 };
+
+	char* raw = r.bufferData + (e.dataOffset - r.header.dataOffset);
+
+	return Get_EntryData_Internal(e, raw, decompbuffer, decompsize);
+}
+
+ResourceEntryData_t Get_EntryData(const ResourceEntry& e, std::ifstream& archivestream, char*& raw, size_t& rawsize, char*& decomp, size_t& decompsize) {
+
+	if (rawsize < e.dataSize) {
+		delete[] raw;
+		raw = new char[e.dataSize];
+		rawsize = e.dataSize;
+	}
+
+	archivestream.seekg(e.dataOffset, std::ios_base::beg);
+	archivestream.read(raw, e.dataSize);
+
+	return Get_EntryData_Internal(e, raw, decomp, decompsize);
+
+}
+
 
 void Read_ResourceArchive(ResourceArchive& r, const fspath pathString, int flags) {
 
@@ -148,12 +201,12 @@ void Audit_ResourceArchive(const ResourceArchive& r) {
 		assert(e.specialHashes == 0);
 		assert(e.metaEntries == 0);
 
+		assert(e.compMode == 0 || e.compMode == 2 || e.compMode == 4);
 		if(e.compMode == 0) {
 			assert(e.dataSize == e.uncompressedSize);
-
-			// Not Guaranteed
-			//assert(e.dataCheckSum == e.defaultHash);
 		}
+		else assert(e.dataSize != e.uncompressedSize);
+
 		// e.dataCheckSum, e.generationTimeStamp, e.defaultHash, e.version, e.flags, e.compMode
 		assert(e.reserved0 == 0);
 		// e.variation
@@ -203,15 +256,20 @@ void Audit_ResourceArchive(const ResourceArchive& r) {
 		}
 		else if (strcmp(typeString, "image") == 0) {
 			assert(e.numDependencies == 1 || e.numDependencies == 0);
-			//assert(e.dataCheckSum == e.defaultHash);
-			//if(e.numDependencies == 0)
-			//	printf("%s\n", nameString);
-			//assert(e.version == 26 || e.version == 25);
+			if(e.numDependencies == 1)
+				assert(e.defaultHash != e.dataCheckSum);
+			if(e.numDependencies == 0)
+				assert(e.defaultHash == e.dataCheckSum || e.defaultHash == 1);
+			assert(e.flags == 0 || e.flags == 1);
+			assert(e.variation == 0);
+			assert(e.version <= 26);
+
+			//if(e.flags == 1)
+			//	 printf("%s\n", nameString);
 		}
 		else if (strcmp(typeString, "mapentities") == 0) {
-			// TODO INVESTIGATE: Kraken Chunked compression results in different hash?
-			if(e.compMode == 0)
-				assert(e.dataCheckSum == e.defaultHash);
+			//if(e.compMode == 0)
+			//	assert(e.dataCheckSum == e.defaultHash);
 			assert(e.version == 80 || e.version == 77);
 			assert(e.flags == 2);
 			assert(e.variation == 70);
