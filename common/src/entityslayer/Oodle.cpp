@@ -44,7 +44,7 @@ bool Oodle::IsInitialized() {
 }
 
 bool Oodle::init() {
-    return Oodle::init("./oo2core_9_win64.dll");
+    return Oodle::init("./oo2core_8_win64.dll");
 }
 
 bool Oodle::init(const char* dllpath)

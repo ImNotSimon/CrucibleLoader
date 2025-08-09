@@ -222,4 +222,8 @@ class BinaryOpener {
 	BinaryReader ToReader() {
 		return BinaryReader(buffer, length);
 	}
+
+	size_t GetSize() const {
+		return length;
+	}
 };

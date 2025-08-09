@@ -18,62 +18,62 @@
 #endif
 
 class StringTable {
-	private:
+private:
 	std::string blob;
 	std::vector<uint64_t> offsets;
-	std::unordered_map<std::string, uint64_t> offsetmap; // Maps strings to their index in the table / offset list
+	std::unordered_map<std::string, uint64_t> offsetmap; // Maps string to byte offset in blob
 
-	public:
+public:
 	StringTable() {
 		blob.reserve(100000);
 		offsets.reserve(1000);
 		offsetmap.reserve(1000);
 	}
 
-
 	/*
-	* Returns the offset for a string
-	* Adds the string to the table if it doesn't exist
+	* Returns the offset index for a string.
+	* Adds string if not already in the table.
+	* 
 	*/
 	uint64_t indexof(const std::string_view s) {
-		const auto iter = offsetmap.find(std::string(s));
-		if (iter == offsetmap.end())
-		{
-			uint64_t index = offsets.size();
-
-			offsets.push_back(blob.size());
+		auto key = std::string(s);
+		const auto iter = offsetmap.find(key);
+		if (iter == offsetmap.end()) {
+			uint64_t offset = static_cast<uint64_t>(blob.size());
+			offsets.push_back(offset);
 			blob.append(s);
 			blob.push_back('\0');
-			offsetmap.emplace(s, index);
-			return index;
+			offsetmap.emplace(std::move(key), offset);
+			return offset;
 		}
-		else 
-		{
+		else {
 			return iter->second;
 		}
 	}
 
 	/*
-	* Copies data over to a string chunk
-	* Once this is called, you can still use this object for locating
-	* offsets but you shouldn't modify it any further
+	* Finalizes the string chunk for writing.
 	*/
 	void finalize(StringChunk& s, uint32_t& finalSize) const {
-		s.numStrings = offsets.size();
-		
-		s.offsets = new uint64_t[offsets.size()];
-		memcpy(s.offsets, offsets.data(), offsets.size() * sizeof(uint64_t));
-		
+		s.numStrings = static_cast<uint64_t>(offsets.size());
+
+		s.offsets = new uint64_t[s.numStrings];
+		memcpy(s.offsets, offsets.data(), s.numStrings * sizeof(uint64_t));
+
 		s.dataBlock = new char[blob.size()];
 		memcpy(s.dataBlock, blob.data(), blob.size());
 
-		// String Count + Offset Chunk + String Blob
-		finalSize = static_cast<uint32_t>(sizeof(uint64_t) + s.numStrings * sizeof(uint64_t) + blob.size());
+		finalSize = static_cast<uint32_t>(
+			sizeof(uint64_t) +                                 // numStrings
+			s.numStrings * sizeof(uint64_t) +                  // offset array
+			blob.size()                                        // actual blob
+			);
 
-		s.paddingCount = 8 - finalSize % 8;
-		finalSize += static_cast<uint32_t>(s.paddingCount);
+		s.paddingCount = (8 - (finalSize % 8)) % 8;  // Fix: only pad if needed
+		finalSize += s.paddingCount;
 	}
 };
+
 
 
 void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchivepath) {
@@ -95,7 +95,7 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 	h.resourceEntriesOffset = sizeof(ResourceHeader);
 	h.numResources = static_cast<uint32_t>(modfiles.size());
 	h.stringTableOffset = h.resourceEntriesOffset + h.numResources * sizeof(ResourceEntry);
-	
+	h.unknown = 0;
 
 	StringTable stable;
 
@@ -231,7 +231,7 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 
 	// IDCL
 	writer.write("IDCL", 4);
-	for(int i = 0; i < archive.idclSize - 4; i++);
+	for (int i = 0; i < archive.idclSize - 4; i++)
 		writer.put('\0');
 
 	// Write data chunks
@@ -249,87 +249,125 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 #define MODDED_TIMESTAMP 123456
 
 void RebuildContainerMask(const fspath metapath, const fspath newarchivepath) {
-	// Read the entire archive into memory
-	BinaryOpener open(metapath.string());
-	assert(open.Okay());
+	atlog << "[RebuildContainerMask] Opening meta archive: " << metapath << "\n";
 
-	
-	// Get addresses of relevant data pieces
+	BinaryOpener open(metapath.string());
+	if (!open.Okay()) {
+		atlog << "ERROR: Failed to open meta archive.\n";
+		return;
+	}
+
+	atlog << "[RebuildContainerMask] Archive opened, buffer size: " << open.GetSize() << " bytes\n";
+
+
 	char* archive = const_cast<char*>(open.ToReader().GetBuffer());
 	ResourceHeader* h = reinterpret_cast<ResourceHeader*>(archive);
-	ResourceEntry* e = reinterpret_cast<ResourceEntry*>(archive + sizeof(ResourceHeader));
+	//ResourceEntry* e = reinterpret_cast<ResourceEntry*>(archive + sizeof(ResourceHeader));
+	ResourceEntry* e = reinterpret_cast<ResourceEntry*>(archive + h->resourceEntriesOffset);
+
+
 	char* compressed = archive + e->dataOffset;
 
-	// A few checks to ensure everything is normal
-	assert(h->numResources == 1);
-	assert(h->dataOffset == e->dataOffset);
-	//assert(e->compMode == 2); COULD CHANGE TO UNCOMPRESSED BETWEEN UPDATES
-	assert(e->defaultHash == e->dataCheckSum);
+	atlog << "[RebuildContainerMask] numResources: " << h->numResources
+		<< ", dataOffset: " << e->dataOffset
+		<< ", compMode: " << e->compMode
+		<< ", dataSize: " << e->dataSize
+		<< ", uncompressedSize: " << e->uncompressedSize << "\n";
 
-	// TODO: If adding multiple archives, must do this for every archive
-	// Get data we'll be inserting into container mask
+
+	// Get new archive's container mask hash
 	containerMaskEntry_t newentry = GetContainerMaskHash(newarchivepath);
 
-	// Number of uint64_t's in our bitmask.
-	// Ensure at least 1 just incase having 0 is bad
-	uint32_t bitmasklongs = static_cast<uint32_t>(newentry.numResources / 64 + (newentry.numResources % 64 ? 1 : 0) + 1);
+	uint32_t bitmasklongs = static_cast<uint32_t>(
+		newentry.numResources / 64 +
+		(newentry.numResources % 64 ? 1 : 0) +
+		1
+		);
 
-	// Hash + bitmasklongs + byte count of our bitmask
 	size_t extraSize = sizeof(uint64_t) + sizeof(uint32_t) + bitmasklongs * sizeof(uint64_t);
+	size_t allocSize = static_cast<size_t>(e->uncompressedSize) + extraSize;
 
-	// Decompress the Oodle-compressed container mask
-	char* decomp = new char[e->uncompressedSize + extraSize];
+	atlog << "[RebuildContainerMask] newentry.numResources: " << newentry.numResources
+		<< ", bitmaskLongs: " << bitmasklongs
+		<< ", extraSize: " << extraSize
+		<< ", allocSize: " << allocSize << "\n";
+
+	if (allocSize > (1ULL << 30)) { // 1 GB safety cap
+		atlog << "ERROR: Allocation request exceeds 1GB, likely corrupted archive or resource count.\n";
+		return;
+	}
+
+	char* decomp = new(std::nothrow) char[allocSize];
+	if (!decomp) {
+		atlog << "ERROR: Memory allocation for decompression buffer failed.\n";
+		return;
+	}
+
 	if (e->compMode == 2) {
+		atlog << "[RebuildContainerMask] Using Oodle decompression...\n";
 		if (!Oodle::DecompressBuffer(compressed, e->dataSize, decomp, e->uncompressedSize)) {
 			atlog << "ERROR: FAILED TO DECOMPRESS CONTAINER MASK\n";
+			delete[] decomp;
 			return;
 		}
 	}
-	else {
-		assert(e->compMode == 0);
+	else if (e->compMode == 0) {
+		atlog << "[RebuildContainerMask] No compression, copying buffer...\n";
 		memcpy(decomp, compressed, e->dataSize);
 	}
+	else {
+		atlog << "ERROR: Unknown compression mode: " << e->compMode << "\n";
+		delete[] decomp;
+		return;
+	}
 
-
-	// Important file offsets
+	// Pointers into the decompressed blob
 	uint32_t* hashCount = reinterpret_cast<uint32_t*>(decomp);
 	uint64_t* newHash = reinterpret_cast<uint64_t*>(decomp + e->uncompressedSize);
 	uint32_t* blobSize = reinterpret_cast<uint32_t*>(decomp + e->uncompressedSize + sizeof(uint64_t));
 	uint64_t* bitmask = reinterpret_cast<uint64_t*>(decomp + e->uncompressedSize + sizeof(uint64_t) + sizeof(uint32_t));
 
-	// Add new bitmask to the file
-	*hashCount = *hashCount + 1;
+	atlog << "[RebuildContainerMask] Original hashCount: " << *hashCount << "\n";
+
+	// Modify the bitmask structure
+	*hashCount += 1;
 	*newHash = newentry.hash;
 	*blobSize = bitmasklongs;
-	for(size_t i = 0; i < bitmasklongs; i++) {
-		*(bitmask + i) = -1;
+
+	for (size_t i = 0; i < bitmasklongs; ++i) {
+		bitmask[i] = ~0ULL; // -1 = all bits set
 	}
 
-	/*
-	* - Unnecessary: Change data offset
-	* - Change data size
-	* - Change uncompressed size
-	* - Change defaultHash and data Check Sum
-	* - Change compMode to 0 (if we opt not to recompress it)
-	*/
-	// Modify the ResourceEntry - disabling compression on the file should be fine
-	e->dataSize = e->uncompressedSize + extraSize;
+	// Update the ResourceEntry
+	e->dataSize = static_cast<uint32_t>(allocSize);
 	e->uncompressedSize = e->dataSize;
 	e->compMode = 0;
 	e->defaultHash = HashLib::ResourceMurmurHash(std::string_view(decomp, e->dataSize));
 	e->dataCheckSum = e->defaultHash;
+	e->generationTimeStamp = MODDED_TIMESTAMP;
 
-	// IMPORTANT: Our gameupdate detection system relies on checking this value
-	// to determine if meta.resources is modded or not.
-	e->generationTimeStamp = MODDED_TIMESTAMP; 
+	atlog << "[RebuildContainerMask] Writing updated archive...\n";
 
-	// Rewrite the file
 	std::ofstream writer(metapath, std::ios_base::binary);
+	if (!writer) {
+		atlog << "ERROR: Failed to open archive for writing: " << metapath << "\n";
+		delete[] decomp;
+		return;
+	}
+
 	writer.write(archive, h->dataOffset);
 	writer.write(decomp, e->dataSize);
 
+	if (!writer) {
+		atlog << "ERROR: Failed while writing updated archive.\n";
+	}
+	else {
+		atlog << "[RebuildContainerMask] Archive written successfully.\n";
+	}
+
 	delete[] decomp;
 }
+
 
 bool IsModded_MapSpec(const fspath& path) {
 	BinaryOpener open(path.string());
@@ -347,6 +385,41 @@ bool IsModded_Meta(const fspath& path) {
 	reader.read(reinterpret_cast<char*>(&e), sizeof(ResourceEntry));
 
 	return e.generationTimeStamp == MODDED_TIMESTAMP;
+}
+
+bool PatchManifest(std::string command, fspath manifestPath, fspath gameDir) {
+
+	try
+	{
+		fspath originalManifest = manifestPath; //already has the filename appended
+		fspath tempManifest = gameDir / "build-manifest.bin";
+
+		std::error_code ec;
+		std::filesystem::rename(originalManifest, tempManifest, ec);
+		if (ec) {
+			printf("ERROR: Failed to move build-manifest to working dir: %s\n", ec.message().c_str());
+			return false;
+		}
+
+		int result = system(command.c_str());
+		if (result != 0) {
+			printf("ERROR: Manifest patcher returned non-zero exit code: %d\n", result);
+		}
+
+		std::filesystem::rename(tempManifest, originalManifest, ec);
+		if (ec) {
+			printf("ERROR: Failed to move build-manifest back to manifest path: %s\n", ec.message().c_str());
+			return false;
+		}
+	}
+	catch (const std::exception& e)
+	{
+		printf("ERROR: Exception during PatchManifest: %s\n", e.what());
+		return false;
+	}
+
+	return true;
+
 }
 
 void InjectorLoadMods(const fspath gamedir, const int argflags) {
@@ -541,8 +614,11 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 	*/
 
 	if (supermod.size() > 0) {
+		atlog << "\n\nBuilding the archive... (resources)\n----------\n";
 		BuildArchive(supermod, outarchivepath);
+		atlog << "\n\nBuilding the archive... (PackageMapSpec)\n----------\n";
 		PackageMapSpec::InjectCommonArchive(gamedir, outarchivepath);
+		atlog << "\n\nBuilding the archive... (ContainerMask)\n----------\n";
 		RebuildContainerMask(metapath, outarchivepath);
 	}
 	else {
@@ -609,15 +685,18 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 
 		else {
 			LABEL_EXIT_HELP:
-			atlog << "AtlanModLoader.exe [--verbose] [--nolaunch] [--forceload] [--gamedir <Dark Ages Installation Folder>]\n";
+			atlog << "AtlanModLoader.exe [--verbose] [--nolaunch] [--forceload] [--gamedir <DOOM Eternal Installation Folder>]\n";
 			return;
 		}
 	}
 
 	const fspath configpath = "./modloader_config.txt";
-	const fspath oo2corepath = "./oo2core_9_win64.dll";
+	const fspath oo2corepath = "./oo2core_8_win64.dll";
 	const fspath cachepath = "./modloader_cache.bin";
-	const fspath manifestpath = gamedirectory / "base/build-manifest.bin";
+	const fspath manifestpath = gamedirectory / "base" / "build-manifest.bin";
+	const fspath manpatcherpath = gamedirectory / "base" / "DEternal_patchManifest.exe"; //should be included with the sln, forked to account for the newly created .resources
+	const std::string aeskey = "8B031F6A24C5C4F3950130C57EF660E9";
+	const std::string manifestCommand = manpatcherpath.string() + " " + aeskey;
 
 	struct LoaderCache_t {
 		uint64_t manifesthash = -1;
@@ -667,22 +746,13 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 	}
 
 	/*
-	* Download Oodle Compression dll if it doesn't exist
-	* No need to do this with every first time setup
+	* oodle check
+	* stripped download implementation as it comes with the game already
 	*/
 
 	if(!std::filesystem::exists(oo2corepath)) {
-		// Because nobody ever needed a simple STL function to convert a string to a wide string....
-		#define OODLE_URL    "https://github.com/WorkingRobot/OodleUE/raw/refs/heads/main/Engine/Source/Programs/Shared/EpicGames.Oodle/Sdk/2.9.10/win/redist/oo2core_9_win64.dll"
-		#define OODLE_URL_W L"https://github.com/WorkingRobot/OodleUE/raw/refs/heads/main/Engine/Source/Programs/Shared/EpicGames.Oodle/Sdk/2.9.10/win/redist/oo2core_9_win64.dll"
-		atlog << "Downloading " << oo2corepath << " from " << OODLE_URL << "\n";
-
-		bool success = Oodle::Download(OODLE_URL_W, oo2corepath.wstring().c_str());
-		if (!success) {
-			atlog << "FATAL ERROR: Failed to download " << oo2corepath << "\n";
-			return;
-		}
-		atlog << "Download Complete (Oodle is a file decompression library)\n";
+		atlog << "FATAL ERROR: Oodle core DLL's not found! These come pre-packaged with DOOM Eternal.\n";
+		return;
 	}
 	if (!Oodle::init()) {
 		atlog << "FATAL ERROR: Failed to initialize " << oo2corepath << "\n";
@@ -704,8 +774,8 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 	if(runPatcher)
 	{
 		// Do not put slashes in any string literals here
-		const fspath patcherpath = gamedirectory / "DarkAgesPatcher.exe";
-		const fspath exepath = gamedirectory / "DOOMTheDarkAges.exe";
+		const fspath patcherpath = gamedirectory / "base" / "EternalPatcher.exe";
+		const fspath exepath = gamedirectory / "DOOMEternal.exe";
 
 		atlog << "\nRunning DarkAgesPatcher.exe by Proteh\n";
 		if(!std::filesystem::exists(patcherpath))
@@ -782,6 +852,8 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 	*/
 	InjectorLoadMods(gamedirectory, argflags);
 
+	atlog << "\n\nFinishing up... (patching manifest)\n";
+	PatchManifest(manifestCommand, manifestpath, gamedirectory); //weird wrap function, probably useless but whatever
 	/*
 	* Finish up
 	*/
@@ -795,7 +867,7 @@ https://github.com/FlavorfulGecko5/EntityAtlan/
 	const fspath absdir = std::filesystem::absolute(gamedirectory);
 	if(std::filesystem::exists(gamedirectory / "steam_api64.dll")) {
 		atlog << "Launching Game with Steam\n";
-		std::system("start \"\" \"steam://run/3017860//\"");
+		std::system("start \"\" \"steam://run/782330//\"");
 	}
 	else {
 		atlog << "Could not determine how to automatically launch your game\n"

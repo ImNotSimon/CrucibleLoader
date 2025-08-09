@@ -3,7 +3,7 @@
 
 typedef std::filesystem::path fspath;
 
-//#define DOOMETERNAL
+#define DOOMETERNAL
 
 #ifdef DOOMETERNAL
 #define ARCHIVE_VERSION 12
@@ -41,10 +41,10 @@ struct ResourceHeader {
     uint64_t  resourceDepsOffset;
     uint64_t  resourceSpecialHashOffset; 
     uint64_t  dataOffset;
-	#ifdef DOOMETERNAL
+	//#ifdef DOOMETERNAL we are backporting to eternal so this is useless
 	uint32_t unknown; // Creates 4 bytes of wasted space with default alignment
 	uint64_t metaOffset;
-	#endif
+	//#endif
 };
 #ifdef DOOMETERNAL
 #pragma pack(pop)

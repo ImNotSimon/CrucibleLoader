@@ -318,7 +318,7 @@ void Test_DumpPriorityManifest()
 	//	}
 	//}
 
-	const std::filesystem::path baseDir = "D:/steam/steamapps/common/DOOMTheDarkAges/base";
+	const std::filesystem::path baseDir = "D:/steam/steamapps/common/DOOMTheDarkAges/base"; //wrong, we're doing it for Eternal
 	int maxNameLength = 0;
 	std::string longestName;
 	// Now we build a manifest
@@ -567,7 +567,7 @@ void Test_AuditAllArchives(fspath installDir) {
 
 int main(int argc, char* argv[]) {
 	#ifdef DOOMETERNAL
-	fspath gamedir = "D:/Steam/steamapps/common/DOOMEternal";
+	fspath gamedir = "D:/SteamLibrary/steamapps/common/DOOMEternal";
 	fspath outputdir = "../input/eternal";
 	#else
 	fspath gamedir = "D:/Steam/steamapps/common/DOOMTheDarkAges";
@@ -578,12 +578,11 @@ int main(int argc, char* argv[]) {
 
 	Test_AuditAllArchives(gamedir);
 
-	//PackageMapSpec::ToString(gamedir);
 
 	//Test_ContainerMask();
-	//PackageMapSpec::ToString(gamedir);
-	//Test_DumpContainerMaskHashes(gamedir, outputdir);
-	//Test_DumpManifests(gamedir, outputdir);
-	//Test_DumpAllHeaders(gamedir, outputdir);
-	//Test_DumpPriorityManifest();
+	PackageMapSpec::ToString(gamedir);
+	Test_DumpContainerMaskHashes(gamedir, outputdir);
+	Test_DumpManifests(gamedir, outputdir);
+	Test_DumpAllHeaders(gamedir, outputdir);
+	Test_DumpPriorityManifest();
 }

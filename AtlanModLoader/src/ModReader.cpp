@@ -7,7 +7,7 @@
 #include <fstream>
 #include <iostream>
 
-#define CFG_PATH "darkagesmod.txt"
+#define CFG_PATH "eternalmod.txt"
 #define CFG_REQUIREDVERSION "requiredVersion"
 #define CFG_LOADPRIORITY "loadPriority"
 #define CFG_ALIASES "aliasing"
