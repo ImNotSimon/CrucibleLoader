@@ -323,6 +323,12 @@ void RebuildContainerMask(const fspath metapath, const fspath newarchivepath) {
 
 	// Pointers into the decompressed blob
 	uint32_t* hashCount = reinterpret_cast<uint32_t*>(decomp);
+
+#ifdef DOOMETERNAL
+	atlog << "[RebuildContainerMask] Incrementing hashCount... (test)\n";
+	hashCount++;
+#endif
+
 	uint64_t* newHash = reinterpret_cast<uint64_t*>(decomp + e->uncompressedSize);
 	uint32_t* blobSize = reinterpret_cast<uint32_t*>(decomp + e->uncompressedSize + sizeof(uint64_t));
 	uint64_t* bitmask = reinterpret_cast<uint64_t*>(decomp + e->uncompressedSize + sizeof(uint64_t) + sizeof(uint32_t));
