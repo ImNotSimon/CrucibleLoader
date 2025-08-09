@@ -1277,9 +1277,12 @@ void EntityParser::Tokenize()
 			case '\r': case '\n': case '\0': // Again, relies on string ending in null character
 			throw Error("No end-quote to complete string literal");
 
-			//case '\\':
-			//if(*(ch+1) == '"') ch++;
-			//goto LABEL_STRING_START;
+			case '\\':
+			if (PARSEMODE == ParsingMode::JSON) {
+				if (*(ch + 1) == '"') ch++;
+			}
+			
+			goto LABEL_STRING_START;
 
 			default:
 			goto LABEL_STRING_START;

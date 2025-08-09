@@ -2,6 +2,7 @@
 #include "cleaner.h"
 
 void ReflectIdlib() {
+	idlibCleaning::JsonToHeader();
 	idlibCleaning::Pass1();
 	idlibCleaning::Pass2();
 	idlibReflection::Generate();

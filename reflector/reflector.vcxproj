@@ -153,6 +153,7 @@
   <ItemGroup>
     <ClCompile Include="src\cleaner_pass1.cpp" />
     <ClCompile Include="src\cleaner_pass2.cpp" />
+    <ClCompile Include="src\json_converter.cpp" />
     <ClCompile Include="src\reflector.cpp" />
     <ClCompile Include="src\ReflectorMain.cpp" />
   </ItemGroup>
