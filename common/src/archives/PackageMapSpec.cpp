@@ -105,7 +105,7 @@ void PackageMapSpec::InjectCommonArchive(const fspath gamedir, const fspath newa
 	entparser.WriteToFile(pmspath.string(), 0);
 }
 
-std::vector<std::string> PackageMapSpec::GetPrioritizedArchiveList(const fspath gamedir)
+std::vector<std::string> PackageMapSpec::GetPrioritizedArchiveList(const fspath gamedir, bool IncludeModArchives)
 {
 	fspath pathMapSpec = gamedir / "base/packagemapspec.json";
 	if(!std::filesystem::exists(pathMapSpec))
@@ -126,8 +126,8 @@ std::vector<std::string> PackageMapSpec::GetPrioritizedArchiveList(const fspath 
 
 			std::string_view nameString = name.getValueUQ();
 			if (nameString.find("modarchives") != std::string::npos) {
-				std::cout << "PackageMapSpec: Ignoring mod archive " << nameString << "\n";
-				continue;
+				if(!IncludeModArchives)
+					continue;
 			}
 
 			// All of this...because the C++ 17 STL doesn't have EndsWith

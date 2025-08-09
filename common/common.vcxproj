@@ -21,6 +21,7 @@
   <ItemGroup>
     <ClCompile Include="src\archives\PackageMapSpec.cpp" />
     <ClCompile Include="src\archives\ResourceStructs.cpp" />
+    <ClCompile Include="src\atlan\AtlanLogger.cpp" />
     <ClCompile Include="src\entityslayer\EntityLogger.cpp" />
     <ClCompile Include="src\entityslayer\EntityNode.cpp" />
     <ClCompile Include="src\entityslayer\EntityParser.cpp" />
@@ -35,6 +36,7 @@
   <ItemGroup>
     <ClInclude Include="src\archives\PackageMapSpec.h" />
     <ClInclude Include="src\archives\ResourceStructs.h" />
+    <ClInclude Include="src\atlan\AtlanLogger.h" />
     <ClInclude Include="src\entityslayer\EntityLogger.h" />
     <ClInclude Include="src\entityslayer\EntityNode.h" />
     <ClInclude Include="src\entityslayer\EntityParser.h" />

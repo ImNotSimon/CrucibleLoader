@@ -11,12 +11,8 @@
 
 #define dsfunc_m(NAME) void NAME(BinaryReader& reader, std::string& writeTo)
 
-DeserialMode deserialmode = DeserialMode::entitydef;
-
-void deserial::SetDeserialMode(DeserialMode newmode)
-{
-	deserialmode = newmode;
-}
+thread_local DeserialMode deserial::deserialmode = DeserialMode::entitydef;
+thread_local bool deserial::include_originals = true;
 
 // Built before deserialization begins
 std::unordered_map<uint64_t, std::string> deserial::declHashMap;
@@ -30,7 +26,7 @@ std::unordered_map<std::string, deserialTypeInfo> typeinfoHistory;
 // Used for stack tracing
 thread_local std::vector<std::string_view> propertyStack;
 thread_local deserialTypeInfo lastAccessedTypeInfo;
-thread_local int warningCount = 0;
+thread_local int deserial::warning_count = 0;
 thread_local int fileCount = 0;
 thread_local const void* fileStartAddress = nullptr; // For debugger view
 thread_local uint64_t currentEntHash = 0;
@@ -47,16 +43,7 @@ void LogWarning(std::string_view msg) {
 		propString.pop_back();
 
 	printf("WARNING: %.*s %.*s\n", (int)propString.length(), propString.data(), (int)msg.length(), msg.data());
-	warningCount++;
-}
-
-void deserial::ds_debugging()
-{
-	printf("Total Warning Count: %d / Files: %d \n", warningCount, fileCount);
-}
-
-int deserial::ds_debugWarningCount() {
-	return warningCount;
+	deserial::warning_count++;
 }
 
 
@@ -239,12 +226,12 @@ void deserial::ds_start_entitydef(BinaryReader& reader, std::string& writeTo, ui
 		const char* unserialized = nullptr;
 		assert(reader.ReadBytes(unserialized, length));
 
-		writeTo.append("original = {");
-		writeTo.append(unserialized, length);
-		writeTo.append("}\n");
+		if (include_originals) {
+			writeTo.append("original = {");
+			writeTo.append(unserialized, length);
+			writeTo.append("}\n");
+		}
 	}
-
-
 
 	// Done
 	assert(reader.ReachedEOF());
@@ -255,8 +242,9 @@ void ds_submapentity(BinaryReader& reader, std::string& writeTo)
 
 }
 
-void ds_submap(BinaryReader& reader, std::string& writeTo, std::string& StringTable, bool BuildStringTable)
+void ds_submap(BinaryReader& reader, BinaryReader& shortmask, std::string& writeTo, std::string& StringTable, bool BuildStringTable)
 {
+	writeTo.append("submap {\n");
 	uint8_t bytecode;
 	uint32_t len;
 
@@ -327,6 +315,17 @@ void ds_submap(BinaryReader& reader, std::string& writeTo, std::string& StringTa
 		LABEL_SKIP_FIRST_4_BYTES:
 		writeTo.append("entity {\n");
 
+		// Seems to correlate with a layer being defined.
+		// Some sort of layer id? 
+		// Layer Ids may vary by submap
+		uint16_t shortmaskvalue;
+		assert(shortmask.ReadLE(shortmaskvalue));
+		if (shortmaskvalue != 0) {
+			writeTo.append("layerID = ");
+			writeTo.append(std::to_string(shortmaskvalue));
+			writeTo.append(";\n");
+		}
+
 		uint32_t namelength = 0;
 		const char* entname = nullptr;
 
@@ -334,14 +333,16 @@ void ds_submap(BinaryReader& reader, std::string& writeTo, std::string& StringTa
 		// Highly likely this is the layers information!!!
 		assert(reader.ReadLE(len));
 		if (len == 1) {
+			assert(shortmaskvalue != 0);
 			assert(reader.ReadLE(namelength));
 			assert(reader.ReadBytes(entname, namelength));
 
 			writeTo.append("layer = \"");
-			writeTo.append(entname);
+			writeTo.append(entname, namelength);
 			writeTo.append("\";\n");
 		}
 		else {
+			assert(shortmaskvalue == 0);
 			assert(len == 0);
 		}
 
@@ -384,64 +385,62 @@ void ds_submap(BinaryReader& reader, std::string& writeTo, std::string& StringTa
 
 		currententity++;
 	}
+
+	assert(reader.ReadLE(len));
+	assert(len == 0);
+	assert(reader.ReachedEOF());
+	assert(shortmask.ReachedEOF());
+
+	writeTo.append("}\n");
 }
 
 void deserial::ds_start_mapentities(BinaryReader& reader, std::string& writeTo)
 {
-	uint32_t totalmaps = *reinterpret_cast<const uint32_t*>(reader.GetBuffer());
-	BinaryReader header(reader.GetBuffer(), totalmaps * 32 + 16 + 100); // Sizeof submap header struct + first 4 integers in file + some extra to prevent OOB
-	assert(header.GoRight(24)); // Move to length of first submap chunk
+	int totalmaps;
+	assert(reader.ReadLE(totalmaps));
+	assert(reader.Goto(0x8)); // Position of the entity count of the first submap
 
-	/* Find the first submap chunk */
-	{
-		const char submapcode[] = { 0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00 };
+	struct submapheader_t {
+		uint32_t entities = 0;
+		uint32_t length = 0;
 
-		// String search function refuses to work so we have to do this
-		const char* ptr = reader.GetBuffer(), * max = reader.GetBuffer() + reader.GetLength() - sizeof(submapcode);
-		size_t startIndex = -1;
+		BinaryReader mapreader;
+		BinaryReader shortmask;
+	};
 
-		while (ptr < max) {
-			if (*ptr == 0) {
-				if (memcmp(ptr, submapcode, sizeof(submapcode)) == 0) {
-					startIndex = ptr - reader.GetBuffer();
-					break;
-				}
-			}
-			ptr++;
-		}
+	submapheader_t* submapheaders = new submapheader_t[totalmaps];
 
-		assert(reader.GoRight(startIndex));
+	// Extract the submap entity totals and block lengths from the header
+	for (int i = 0; i < totalmaps; i++) {
+		assert(reader.ReadLE(submapheaders[i].entities));
+		assert(reader.GoRight(0xC));
+		assert(reader.ReadLE(submapheaders[i].length));
+		assert(reader.GoRight(0xC));
 	}
 
-	/*
-	* We are interpreting it as:
-	* - Start of submap is 0x0A
-	* - End of submap has 4 null bytes
-	*/
+	// Since we don't know how to calculate the length of the header chunk,
+	// we must iterate backwards through the file to extract the submap chunks
+	const char* tempptr = reader.GetBuffer() + reader.GetLength();
+	for (int i = totalmaps - 1; i > -1; i--) {
+		submapheader_t& sm = submapheaders[i];
+
+		tempptr -= sm.length;
+		sm.mapreader = BinaryReader(tempptr, sm.length);
+		tempptr -= sm.entities * 2;
+		sm.shortmask = BinaryReader(tempptr, sm.entities * 2);
+
+	}
 
 	std::string stringtable;
-	for (uint32_t i = 0; i < totalmaps; i++) {
-		uint32_t submaplength;
-		assert(header.ReadLE(submaplength));
-		assert(header.GoRight(28));
 
-		while (*reader.GetNext() != 0x0A) {
-			uint8_t dummy;
-			assert(reader.ReadLE(dummy));
-			
-			// Not guaranteed
-			//assert(dummy == 0); 
-		}
-		
-		BinaryReader submapreader(reader.GetNext(), submaplength);
-		ds_submap(submapreader, writeTo, stringtable, i == 0);
 
-		assert(reader.GoRight(submaplength));
+	for (int i = 0; i < totalmaps; i++) {
+		ds_submap(submapheaders[i].mapreader, submapheaders[i].shortmask, writeTo, stringtable, i == 0);
 	}
 
-	assert(reader.ReachedEOF());
-
 	writeTo.append(stringtable);
+
+	delete[] submapheaders;
 	//printf("%s", stringtable.c_str());
 }
 
@@ -1096,11 +1095,20 @@ dsfunc_m(deserial::ds_idLogicProperties)
 */
 dsfunc_m(ds_idEventArgDeclPtr)
 {
+	if (*(reader.GetBuffer() - 5) == 1) {
+		assert(reader.GetLength() == 0);
+		writeTo.append("NULL;\n");
+		return;
+	}
+
 	// Also not farm hashes
 	const dspropmap_t propMap = {
 		{15128935135463038980, {&deserial::ds_pointerdecl, "soundstate"}},
 		{17887799704904324637, {&deserial::ds_pointerdecl, "rumble"}},
-		{17887800778963345949, {&deserial::ds_pointerdecl, "string"}}
+		{17887800778963345949, {&deserial::ds_pointerdecl, "string"}},
+		{17887784525484514587, {&deserial::ds_pointerdecl, "damage"}},
+		{15128935076300951565, {&deserial::ds_pointerdecl, "soundevent"}},
+		{8150212324453652044, {&deserial::ds_pointerdecl, "gorewounds"}},
 	};
 	deserial::ds_structbase(reader, writeTo, propMap);
 }
@@ -1120,6 +1128,9 @@ dsfunc_m(deserial::ds_idEventArg)
 		{614444004, {&ds_encounterLogicOperator_t, "encounterLogicOperator_t"}},
 		{18446744072262373936, {&ds_eEncounterEventFlags_t, "eEncounterEventFlags_t"}},
 		{18446744072526653912, {&ds_idEmpoweredAIType_t, "idEmpoweredAIType_t"}},
+		{1323721246, {&ds_fxCondition_t, "fxCondition_t"}},
+		{402298019, {&ds_socialEmotion_t, "socialEmotion_t"}},
+		{18446744073561678798, {&ds_damageCategoryMask_t, "damageCategoryMask_t"}},
 		{853223886056435927, {&ds_idEventArgDeclPtr, "decl"}},
 	};
 	ds_structbase(reader, writeTo, propMap);

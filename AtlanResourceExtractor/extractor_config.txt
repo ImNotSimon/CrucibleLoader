@@ -1,0 +1,53 @@
+core = {
+	input_folder = ""
+	output_folder = ""
+	run_extractor = 1
+	run_deserializer = 1
+}
+extractor = {
+	resource_types = {
+		rs_streamfile
+		entityDef
+		logicEntity
+		logicFX
+		logicClass
+		logicUIWidget
+		logicLibrary
+		mapentities
+		binarymd6def
+		file
+	}
+}
+deserializer = {
+}
+/********************
+
+Settings Explained:
+
+input_folder: Path to your DOOM: The Dark Ages game installation
+Example: input_folder = "C:/Steam/steamapps/common/DOOMTheDarkAges"
+
+output_folder: Where to output extracted files
+Must be < 16 characters long to prevent export failures due to long file paths
+Example: output_folder = "D:/DA"
+
+run_extractor: Set to 0 if you only want to run the deserializer
+
+run_deserializer: Set to 0 if you only want to run the extractor
+(NOTE: The deserializer isn't added yet so this won't do anything for now)
+
+------
+
+Advanced Extractor Settings:
+
+resource_types: The types of resources that will be extracted.
+All officially supported resource types are included by default.
+
+You can exclude any type by commenting it out like this:
+// rs_streamfile
+
+
+WARNING: Adding resource types not officially supported by this extractor
+may lead to undesired behavior! Do this at your own risk.
+
+********************/

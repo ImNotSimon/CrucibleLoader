@@ -5,6 +5,7 @@
 #include "hash/HashLib.h"
 #include "io/BinaryReader.h"
 #include "archives/ResourceStructs.h"
+#include "atlan/AtlanLogger.h"
 #include <set>
 #include <unordered_map>
 #include <iostream>
@@ -109,9 +110,8 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 		uint64_t* ptr = archive.stringIndex;
 		for (uint64_t i = 0; i < modfiles.size(); i++) {
 			const ModFile& f = *modfiles[i];
-			const char* typeString = ModFileTypeStrings[static_cast<uint64_t>(f.assetType)];
 
-			*ptr = stable.indexof(typeString);
+			*ptr = stable.indexof(f.typedata->typestring);
 			*(ptr + 1) = stable.indexof(f.assetPath);
 			
 			ptr += 2;
@@ -179,7 +179,7 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 		/*
 		* Set values that vary based on resource type
 		*/
-		if (f.assetType == ModFileType::rs_streamfile) {
+		if (f.typedata->typeenum == ModFileType::rs_streamfile) {
 			e.depIndices = 0;
 			e.version = 0;
 			e.flags = 0;
@@ -201,7 +201,7 @@ void BuildArchive(const std::vector<const ModFile*>& modfiles, fspath outarchive
 		}
 		else {
 			atlog << "\nERROR: Unsupported resource type made it into build";
-			return;
+			continue;
 		}
 	}
 
@@ -424,7 +424,6 @@ bool PatchManifest(std::string command, fspath manifestPath, fspath gameDir) {
 
 void InjectorLoadMods(const fspath gamedir, const int argflags) {
 	fspath modsdir = gamedir / "mods";
-	fspath loosezippath = modsdir / "TEMPORARY_unzipped_modfiles.zip";
 	fspath basedir = gamedir / "base";
 	fspath outdir = basedir / "modarchives";
 	fspath outarchivepath = outdir / "common_mod.resources";
@@ -505,11 +504,6 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 		for (const fspath& fp : filesToDelete) {
 			remove(fp, lastCode);
 		}
-
-		// Ensure the temporary loose mod zip doesn't exist
-		if (exists(loosezippath)) {
-			remove(loosezippath, lastCode);
-		}
 	}
 
 	if(argflags & argflag_resetvanilla) {
@@ -561,7 +555,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 	ModDef* realmods = new ModDef[totalmods];
 
 	realmods[0].loadPriority = -999;
-	ModReader::ReadLooseMod(realmods[0], loosezippath, loosemodpaths, argflags);
+	ModReader::ReadLooseMod(realmods[0], modsdir, loosemodpaths, argflags);
 	for (int i = 1; i < totalmods; i++) {
 		ModReader::ReadZipMod(realmods[i], zipmodpaths[i - 1], argflags);
 	}
@@ -594,7 +588,7 @@ void InjectorLoadMods(const fspath gamedir, const int argflags) {
 					atlog << "CONFLICT FOUND: " << file.assetPath
 						<< "\n(A):" << current.modName << " - " << file.realPath
 						<< "\n(B):" << iter->second->parentMod->modName << " - " << iter->second->realPath
-						<< "\nWinner: " << (replaceMapping ? "(A)\n" : "(B)\n---\n");
+						<< "\nWinner: " << (replaceMapping ? "(A)\n---\n" : "(B)\n---\n");
 
 					if(replaceMapping) {
 						iter->second = &file;

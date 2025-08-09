@@ -2,6 +2,7 @@
 #include "miniz/miniz.h"
 #include "entityslayer\EntityParser.h"
 #include "GlobalConfig.h"
+#include "atlan/AtlanLogger.h"
 #include <unordered_map>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,45 @@
 #define CFG_ALIASES "aliasing"
 
 typedef std::filesystem::path fspath;
+
+// Key is the start of the file path
+const std::unordered_map<std::string, resourcetypeinfo_t> ValidResourceTypes = {
+	{
+		"rs_streamfile", 
+		{
+			"rs_streamfile",
+			RTF_None,
+			ModFileType::rs_streamfile
+		}
+	},
+
+	{
+		"entityDef",
+		{
+			"entityDef",
+			RTF_NoExtension | RTF_Disabled,
+			ModFileType::entityDef
+		}
+	},
+
+	{
+		"mapentities",
+		{
+			"mapentities",
+			RTF_NoExtension | RTF_Disabled,
+			ModFileType::mapentities
+		}
+	},
+
+	{
+		"image",
+		{
+			"image",
+			RTF_None | RTF_Disabled,
+			ModFileType::image
+		}
+	}
+};
 
 struct configData_t {
 	int requiredversion = 1;
@@ -83,6 +123,8 @@ void ReadConfigData(configData_t& cfg, mz_zip_archive* zptr)
 	//}
 }
 
+void ReadMod(mz_zip_archive* zptr, ModDef& readto, int argflags);
+
 /*
 * The strategy: zip loose mod files into a zip file, and then re-read that zip.
 * 
@@ -90,13 +132,13 @@ void ReadConfigData(configData_t& cfg, mz_zip_archive* zptr)
 * codepaths that must behave exactly the same while using two completely different IO interfaces.
 * It's far less of a headache to merge the rarely-used codepath into the commonly used one.
 */
-void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const std::vector<fspath>& pathlist, int argflags)
+void ModReader::ReadLooseMod(ModDef& readto, const fspath& modsfolder, const std::vector<fspath>& pathlist, int argflags)
 {
 	if(pathlist.empty())
 		return;
-	atlog << "Zipping Loose Mod Files\n";
+	atlog << "Reading Unzipped Mod Files\n---\n";
 
-	size_t substringIndex = tempzippath.parent_path().string().size() + 1; // + 1 Accounts for the backslash
+	size_t substringIndex = modsfolder.string().size() + 1; // + 1 Accounts for the backslash
 
 	// Initialize the zip data
 	mz_zip_archive zipfile;
@@ -108,7 +150,7 @@ void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const st
 	for (const fspath& fp : pathlist) {
 		std::string zippedName = fp.string().substr(substringIndex);
 
-		bool result = mz_zip_writer_add_file(zptr, zippedName.c_str(), fp.string().c_str(), "", 0, MZ_DEFAULT_COMPRESSION);
+		bool result = mz_zip_writer_add_file(zptr, zippedName.c_str(), fp.string().c_str(), "", 0, MZ_NO_COMPRESSION);
 		if (!result)
 			atlog << "ERROR: Failed to add file to zip\n";
 	}
@@ -118,25 +160,23 @@ void ModReader::ReadLooseMod(ModDef& readto, const fspath& tempzippath, const st
 	void* buffer = nullptr;
 	bool finalize = mz_zip_writer_finalize_heap_archive(zptr, &buffer, &bufferused);
 	if (!finalize) {
-		atlog << "ERROR: Failed to finalize zip archive\n";
+		atlog << "ERROR: Failed to finalize loose mod zip archive\n";
 	}
 
-	// Write the zip data
-	std::ofstream outzip(tempzippath, std::ios_base::binary);
-	outzip.write((char*)buffer, bufferused);
-	outzip.close();
-
-	// Clean up heap data
+	// Setup an in-memory-zip reader for the finished buffer data
 	mz_zip_writer_end(zptr);
-	delete[] buffer;
-	//atlog << "Finished zipping loose mod files\n";
-	
-	// Read the zip to a mod struct
-	ReadZipMod(readto, tempzippath, argflags);
-	// todo: mz_zip_reader_init_mem
+	mz_zip_zero_struct(zptr);
+	bool readerInit = mz_zip_reader_init_mem(zptr, buffer, bufferused, 0);
+	if (!readerInit) {
+		atlog << "ERROR: Failed to open loose mod zip for reading\n";
+		return;
+	}
 
-	// Delete the temporary mod zip
-	std::filesystem::remove(tempzippath);
+	readto.modName = "Unzipped Mod Files";
+	ReadMod(zptr, readto, argflags);
+
+	mz_zip_reader_end(zptr);
+	delete[] buffer;
 }
 
 void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
@@ -152,6 +192,14 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
 		atlog << "ERROR: Failed to open zip file\n";
 		return;
 	}
+
+	mod.modName = zipPath.stem().string();
+	ReadMod(zptr, mod, argflags);
+	mz_zip_reader_end(zptr);
+}
+
+void ReadMod(mz_zip_archive* zptr, ModDef& mod, int argflags)
+{
 	
 	/*
 	* Read config files if they exist
@@ -159,14 +207,12 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
 	configData_t cfg;
 	ReadConfigData(cfg, zptr);
 	mod.loadPriority = cfg.loadpriority;
-	mod.modName = zipPath.stem().string();
 
 	/*
 	* Check if version requirement is met. If it isn't, skip reading the mod files
 	*/
 	if (MOD_LOADER_VERSION < cfg.requiredversion) {
 		atlog << "ERROR: Mod requires Mod Loader Version " << cfg.requiredversion << " or greater. (Your version is " << MOD_LOADER_VERSION << ")\n";
-		mz_zip_reader_end(zptr);
 		return;
 	}
 
@@ -239,12 +285,18 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
 		/*
 		* Map the typeString to a resource type
 		*/
-		if (typeString == "rs_streamfile") {
-			modfile.assetType = ModFileType::rs_streamfile;
-		}
-		else {
-			atlog << "ERROR: Unsupported resource type for file \"" << modfile.realPath << "\"\n";
-			continue;
+		{
+			const auto& iter = ValidResourceTypes.find(typeString);
+			if (iter == ValidResourceTypes.end()) {
+				atlog << "ERROR: Unsupported resource type for file \"" << modfile.realPath << "\"\n";
+				continue;
+			}
+
+			if (iter->second.typeflags & RTF_Disabled) {
+				atlog << "ERROR: Disabled resource type for file \"" << modfile.realPath << "\"\n";
+				continue;
+			}
+			modfile.typedata = &iter->second;
 		}
 
 
@@ -260,9 +312,8 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
 				*nameEnd = '/';
 				break;
 
-				// EntityDefs have no extension
 				case '.':
-				if (modfile.assetType == ModFileType::entityDef) {
+				if (modfile.typedata->typeflags & RTF_NoExtension) {
 					goto LABEL_EARLY_OUT;
 				}
 				break;
@@ -321,6 +372,5 @@ void ModReader::ReadZipMod(ModDef& mod, const fspath& zipPath, int argflags)
 		mod.modFiles.push_back(modfile);
 	}
 
-	mz_zip_reader_end(zptr);
 	delete[] nameBuffer;
 }

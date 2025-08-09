@@ -98,7 +98,7 @@ class EntNode
 
 	const char* NamePtr() const {return textPtr;}
 
-	const char* ValuePtr() const {return textPtr + valLength;}
+	const char* ValuePtr() const {return textPtr + nameLength;}
 
 	int NameLength() const { return nameLength; }
 
