@@ -375,3 +375,7 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# vcpkg stuff
+vcpkg_installed/
+DEternal_ManifestPatcherCPP/vcpkg_installed
