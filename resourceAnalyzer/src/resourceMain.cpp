@@ -286,7 +286,7 @@ void Test_DumpPriorityManifest()
 	};
 
 	// STL Container happy fun time
-	std::vector<std::string> packages = PackageMapSpec::GetPrioritizedArchiveList("D:/steam/steamapps/common/DOOMTheDarkAges");
+	std::vector<std::string> packages = PackageMapSpec::GetPrioritizedArchiveList("D:/steam/steamapps/common/DOOMTheDarkAges", false);
 	std::unordered_map<std::string, std::vector<PackageManifest>> groupedPackages; // First in vector = higher priority
 	std::vector<std::string> packageNameList;
 
@@ -447,7 +447,7 @@ void Test_DumpPriorityManifest()
 * DUMPS MANIFEST FILES FOR ALL RESOURCE ARCHIVES IN THE GAME
 */
 void Test_DumpManifests(fspath installDir, fspath outputDir) {
-	std::vector<std::string> packages = PackageMapSpec::GetPrioritizedArchiveList(installDir);
+	std::vector<std::string> packages = PackageMapSpec::GetPrioritizedArchiveList(installDir, false);
 	ExtensionData audit;
 
 	for (int i = 0; i < packages.size(); i++) {
@@ -539,7 +539,7 @@ struct entryvariations_t {
 };
 
 void Test_AuditAllArchives(fspath installDir) {
-	std::vector<std::string> packages = PackageMapSpec::GetPrioritizedArchiveList(installDir);
+	std::vector<std::string> packages = PackageMapSpec::GetPrioritizedArchiveList(installDir, false);
 
 	std::unordered_map<std::string, entryvariations_t> variations;
 	variations.reserve(100);
